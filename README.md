@@ -14,6 +14,7 @@ dpcol/                         código (python -m dpcol ...)
   validar.py                   variación anual, cobertura, filas a revisar
   desde_ancho.py               base ancha de trabajo → formato largo
   catalogo.py                  catálogo de fuentes por institución
+  organizar.py                 copia documentos a <CÓDIGO>-<IES>/<AÑO>/ con inventario y detección de duplicados
 data/raw|staging|salidas       datos locales (no se versionan)
 docs/METODOLOGIA.md            reglas, estados y hallazgos
 tests/                         pruebas (pytest)
@@ -33,6 +34,27 @@ python -m dpcol normalizar --entrada PRECIOS_2026_AUDITORIA.xlsx --formato ancho
 
 # Crear/actualizar el catálogo de fuentes de 2027
 python -m dpcol catalogo --base PRECIOS_2026_AUDITORIA.xlsx --anio 2027
+
+# Organizar documentos fuente (copia; nunca mueve ni borra originales)
+python -m dpcol organizar --fuente PDF --fuente "Derechos Pecuniarios/ULT. COMPILADO" \
+    --fuente "Derechos Pecuniarios/DATA_2024::2024" --fuente "Derechos Pecuniarios/data_2023::2023" \
+    --fuente "Derechos Pecuniarios/Archivos" --destino 01_DOCUMENTOS
+```
+
+`::AÑO` asigna ese año a los archivos que no lo tienen en el nombre ni en su carpeta
+(queda marcado como `ORIGEN_ANIO=raiz`). El orden de `--fuente` define cuál copia se
+conserva cuando hay archivos idénticos.
+
+## Carpeta de trabajo (PRECIOS)
+
+```
+PRECIOS/
+  Derechos Pecuniarios/            histórico descargado del SharePoint, sin modificar
+  01_DOCUMENTOS/<CÓDIGO>-<IES>/<AÑO>/<CÓDIGO>_<AÑO>_<descripción>.pdf
+  02_BASES/                        T08 vigente, base con histórico, auditoría; _versiones_2026/ con intermedios
+  03_SALIDAS/<AÑO>/                resultados de `dpcol normalizar`
+  inventario_documentos.csv        cada archivo: estado, institución, año, SHA-256, ruta nueva y original
+  resumen_documentos_por_institucion.csv
 ```
 
 Salidas de `normalizar`:

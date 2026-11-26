@@ -14,6 +14,7 @@ from .desde_ancho import ancho_a_largo, leer_base
 from .io import escribir_csv, escribir_t08, leer_csv
 from .maestro import cargar_maestro, cargar_periodos
 from .normalizar import Parametros, normalizar
+from .organizar import maestro_instituciones, organizar, resumen_por_institucion
 from .validar import a_revisar, cobertura_por_ies, resumen_estados, variacion_anual
 
 
@@ -60,6 +61,22 @@ def _cmd_catalogo(a: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_organizar(a: argparse.Namespace) -> int:
+    fuentes = []
+    for f in a.fuente:
+        ruta, _, anio = f.partition("::")
+        fuentes.append((Path(ruta), int(anio) if anio else None))
+    maestro = maestro_instituciones([r for r, _ in fuentes])
+    destino = Path(a.destino)
+    inv = organizar(fuentes, destino, maestro, ejecutar=not a.simular)
+    inv_path = Path(a.inventario) if a.inventario else destino.parent / "inventario_documentos.csv"
+    escribir_csv(inv, inv_path)
+    escribir_csv(resumen_por_institucion(inv), inv_path.with_name("resumen_documentos_por_institucion.csv"))
+    print(f"{'SIMULACIÓN: ' if a.simular else ''}{len(inv):,} archivos revisados; inventario en {inv_path}")
+    print(inv["ESTADO"].value_counts().to_string())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="dpcol", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -80,6 +97,14 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--anio-ref", type=int, default=None, help="Año del que se toman las fuentes previas (por defecto anio-1)")
     c.add_argument("--salida", default="fuentes/catalogo_fuentes.csv")
     c.set_defaults(func=_cmd_catalogo)
+
+    o = sub.add_parser("organizar", help="Copia documentos fuente a <CÓDIGO>-<IES>/<AÑO>/ y genera inventario")
+    o.add_argument("--fuente", action="append", required=True,
+                   help="Carpeta origen, opcionalmente con año por defecto: 'ruta::2024'. Repetible; el orden es la prioridad ante duplicados")
+    o.add_argument("--destino", required=True)
+    o.add_argument("--inventario", default=None)
+    o.add_argument("--simular", action="store_true", help="No copia; solo genera el inventario")
+    o.set_defaults(func=_cmd_organizar)
 
     a = ap.parse_args(argv)
     return a.func(a)
