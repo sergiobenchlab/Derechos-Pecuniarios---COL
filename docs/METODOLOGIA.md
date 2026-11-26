@@ -105,3 +105,18 @@ observaciones), `SOLO_TABULAR` (solo XLSX/CSV), `FALTA_ACTO`.
 Caso de referencia — Universidad Simón Bolívar 2026: `PRECIOS 2026.pdf` (escaneado) es el
 Acuerdo de Sala General No. 65 de 2025 (28‑nov‑2025), "para el año 2026", 9 de 9 páginas,
 con cierre → `OK`. `SIMON_BOLIVAR_2026.pdf` es el Reglamento (Acuerdo 58 de 2019) → `SIN_PRECIOS`.
+
+### Fuente completa "acto + tabla"
+
+Algunas IES expiden un acto que solo fija el **porcentaje** de incremento (p. ej. "IPC + 1",
+"será del 5,51 %") y publican los valores en una tabla aparte. Si para el año existe un acto
+válido con estado `SOLO_INCREMENTO` o `POCOS_VALORES` y además una tabla con valores
+(PDF con montos o XLSX/CSV), la institución queda `COMPLETO` con `TIPO_FUENTE = acto+tabla`.
+
+### Búsqueda de actos faltantes (2026)
+
+Cuando solo hay tablas de tarifas, se busca el acto en el sitio oficial (búsqueda web
+restringida al dominio de la IES, revisión de las páginas de matrículas/derechos pecuniarios
+y de las referencias que citan las propias tablas). Las descargas se hacen al equipo local,
+se validan antes de copiarse a `01_DOCUMENTOS/<IES>/2026/`, y quedan registradas en
+`03_SALIDAS/descargas_web.csv` y en el inventario (`ESTADO = DESCARGADO_WEB`, URL en `RUTA_ORIGINAL`).

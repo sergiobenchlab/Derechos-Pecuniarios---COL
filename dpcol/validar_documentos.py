@@ -95,7 +95,7 @@ _TIPOS_ACTO = r"(acuerdo|resolucion(?: rectoral(?: general)?| de rectoria| de co
 _RE_TIPO = re.compile(r"\b" + _TIPOS_ACTO + r"\b")
 # identificador tras el tipo: "no. 65", "nro. 130", "no.19", "dp-033-2025", "cd-037-2025", "r – 2025 – 032", "s.1.1- 1954", "114"
 _RE_ID = re.compile(
-    r"^[\s:]*(?:(?:de|del)?\s*(?:la\s+)?(?:sala general|consejo(?:\s+(?!no\b|nro\b|numero\b)[a-z]+){0,5}|rectoria|consiliatura|junta directiva)\s*)?"
+    r"^[\s:]*(?:(?:de|del)?\s*(?:la\s+)?(?:sala general|consejo(?:\s+(?!no\b|nro\b|numero\b)[a-z]+){0,5}|rectoria|consiliatura|junta directiva|presidencia(?: institucional)?)\s*)?"
     r"(?:n(?:o|ro|um|umero)?\s*[.°º:”\x22'*]*\s*(?:o\b\.?\s*)?)?"
     r"((?:[a-z]{1,4}[\s.]*(?:\d[.\d]*)?\s*[-–]\s*)?\d[\d]*(?:\s*[-–]\s*\d+)*)"
 )
@@ -112,7 +112,11 @@ _RE_CIERRE = re.compile(r"(dad[oa] en|comuniquese|publiquese|cumplase|para const
 _RE_DINERO = re.compile(r"\$\s*\d{1,3}(?:['’]\d{3})?(?:[.,\s]\d{3})+|(?<![\d.,'’])\d{1,3}(?:['’]\d{3})?(?:[.,]\d{3})+(?![\d.,]*\d)")
 _RE_POR_CUAL = re.compile(r"por (?:el|la|medio de la|medio del|medio de el) cual|por medio de la presente|se (?:fija|establece|aprueba|determina)")
 _RE_NO_ES_ACTO = re.compile(r"(personeria|mediante|segun|conforme a|modificad[oa] por|derogad[oa]|reconocid[oa])[^\n]{0,20}$")
-_RE_INCREMENTO = re.compile(r"increment\w*[^%]{0,120}?\d{1,2}(?:[.,]\d{1,2})?\s*%|\(\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\s*\)")
+_RE_INCREMENTO = re.compile(
+    r"(?:increment|ajust|actualiz|aument)\w*[^%]{0,160}?\d{1,2}(?:[.,]\d{1,2})?\s*%"
+    r"|\(\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\s*\)"
+    r"|(?:increment|ajust|aument)\w*[^.]{0,80}?\bipc\b"
+)
 _RE_REGLAMENTO = re.compile(r"\breglamento\b")
 
 
@@ -310,7 +314,7 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
 ORDEN_GRAVEDAD = [
     "NO_LEGIBLE", "SIN_PRECIOS", "VIGENCIA_DISTINTA", "INCOMPLETO_PAGINAS",
     "FECHA_FUERA_DE_RANGO", "SIN_ACTO_IDENTIFICADO", "SIN_FECHA", "SIN_CIERRE",
-    "SOLO_INCREMENTO", "FECHA_TARDIA", "FECHA_TEMPRANA", "VIGENCIA_NO_EXPLICITA", "OK",
+    "SOLO_INCREMENTO", "POCOS_VALORES", "FECHA_TARDIA", "FECHA_TEMPRANA", "VIGENCIA_NO_EXPLICITA", "OK",
 ]
 
 
@@ -322,6 +326,9 @@ def dictaminar(a: Analisis, anio_objetivo: int, min_valores: int = 3) -> tuple[s
         if a.fija_incremento and not a.es_reglamento:
             obs.append("SOLO_INCREMENTO")
             obs.append("fija un % de incremento sin tabla de valores: requiere los valores del año anterior")
+        elif a.valores_dinero > 0 and a.tipo_acto and not a.es_reglamento:
+            # p. ej. un valor único de matrícula para todos los programas
+            obs.append("POCOS_VALORES")
         else:
             obs.append("SIN_PRECIOS")
             if a.es_reglamento:
@@ -439,7 +446,7 @@ def validar_carpeta(
     return docs, resumen_institucion(docs, anio_objetivo)
 
 
-_VALIDOS = {"OK", "SOLO_INCREMENTO", "FECHA_TEMPRANA", "FECHA_TARDIA", "VIGENCIA_NO_EXPLICITA", "SIN_CIERRE", "SIN_FECHA", "SIN_ACTO_IDENTIFICADO"}
+_VALIDOS = {"OK", "SOLO_INCREMENTO", "POCOS_VALORES", "FECHA_TEMPRANA", "FECHA_TARDIA", "VIGENCIA_NO_EXPLICITA", "SIN_CIERRE", "SIN_FECHA", "SIN_ACTO_IDENTIFICADO"}
 
 
 def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:
@@ -451,19 +458,30 @@ def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:
         del_anio = g[(vig == anio_objetivo) | ((g["CARPETA_ANIO"] == anio_objetivo) & vig.isna())]
         validos = del_anio[del_anio["ESTADO_DOC"].isin(_VALIDOS)]
         limpios = validos[validos["ESTADO_DOC"] == "OK"]
+        # Acto que fija % o pocos valores + tabla publicada del mismo año = fuente completa
+        actos_pct = validos[validos["ESTADO_DOC"].isin(["SOLO_INCREMENTO", "POCOS_VALORES"])]
+        n_val = pd.to_numeric(del_anio.get("VALORES_DINERO"), errors="coerce").fillna(0)
+        hay_tabla = bool(((n_val >= 3) & (del_anio["ESTADO_DOC"] != "SIN_PRECIOS")).any()) or bool((g["ESTADO_DOC"] == "NO_PDF").any())
+        tipo_fuente = ""
         if len(limpios):
-            estado = "COMPLETO"
+            estado, tipo_fuente = "COMPLETO", "acto"
+        elif len(actos_pct) and hay_tabla:
+            estado, tipo_fuente = "COMPLETO", "acto+tabla"
+            limpios = actos_pct
         elif len(validos):
             estado = "REVISAR"
         elif (g["ESTADO_DOC"] == "NO_PDF").any():
             estado = "SOLO_TABULAR"
         else:
             estado = "FALTA_ACTO"
-        mejor = (limpios if len(limpios) else validos).head(1)
+        base_mejor = limpios if len(limpios) else validos
+        # prioriza documentos con acto identificado
+        mejor = base_mejor.assign(_t=base_mejor["ACTO"].fillna("").astype(str).str.len() > 0) \
+            .sort_values("_t", ascending=False, kind="stable").head(1)
         enc = pd.to_numeric(validos.get("PROGRAMAS_ENCONTRADOS"), errors="coerce").max() if len(validos) else None
         tot = pd.to_numeric(g.get("PROGRAMAS_ACTIVOS"), errors="coerce").max()
         filas.append({
-            "CODIGO_INSTITUCION": cod, "INSTITUCION": inst, "ESTADO_INSTITUCION": estado,
+            "CODIGO_INSTITUCION": cod, "INSTITUCION": inst, "ESTADO_INSTITUCION": estado, "TIPO_FUENTE": tipo_fuente,
             "DOCUMENTOS_REVISADOS": len(g), "DOCUMENTOS_VALIDOS": len(validos),
             "ACTO_PRINCIPAL": mejor["ACTO"].iat[0] if len(mejor) else "",
             "FECHA_EXPEDICION": mejor["FECHA_EXPEDICION"].iat[0] if len(mejor) else "",

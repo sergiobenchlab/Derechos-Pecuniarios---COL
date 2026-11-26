@@ -124,6 +124,8 @@ from dpcol.validar_documentos import _identificar_acto, _plano
      "POR LA CUAL SE FIJAN LOS VALORES. Que el Consejo Superior en su sesión Acta No. 327 autorizó", "RESOLUCION", "750", 2024),
     ("RESOLUCIÓN RECTORAL Nro. 130 Medellín, noviembre 27 de 2025", "RESOLUCION", "130", None),
     ("ACUERDO DE SALA GENERAL No. 65 DE 2025 (noviembre 28)", "ACUERDO", "65", 2025),
+    ("UNIVERSIDAD Resolución de la Presidencia Institucional No 017 de 2025 Por la cual se autoriza el porcentaje de "
+     "aumento de matriculas Personeria Juridica No 22195 de 1985 Resolución 1780 de 2010", "RESOLUCION", "017", 2025),
     ("Pontificia Universidad JAVERIANA ACUERDO N”. 781 Valores de Matrícula y Otros Derechos Pecuniarios", "ACUERDO", "781", None),
     ("R.R.G. No. 086/2025 RESOLUCIÓN RECTORAL GENERAL NO. 086 DEL 14 DE NOVIEMBRE DE 2025 “Por medio de la cual se establecen",
      "RESOLUCION", "086", 2025),
@@ -155,6 +157,18 @@ def test_orden_ejecutiva_sin_numero_toma_anio_de_fecha():
     a = analizar_texto([t * 3])
     assert a.fecha_expedicion == date(2025, 11, 27)
     assert a.vigencia == 2026
+
+
+def test_ajuste_porcentual_y_valor_unico():
+    central = ("ACUERDO DEL CONSEJO SUPERIOR N.° 34 de 2025 Noviembre 26 de 2025 Por el cual se establece el ajuste al "
+               "valor de las matrículas para el año 2026. La actualización del valor del crédito académico para el año "
+               "2026 será del 5,51 %, lo que corresponde al IPC. " + "texto " * 60 + " Comuníquese y cúmplase")
+    assert dictaminar(analizar_texto([central]), 2026)[0] == "SOLO_INCREMENTO"
+    sanjose = ("RESOLUCIÓN CONSEJO DIRECTIVO No 20-2025 Por la cual se establece el valor de la Matricula para el año "
+               "2026. Establecer el valor de la matricula por estudiante: CUATRO MILLONES ($4.370.822) y el crédito "
+               "$277.157 " + "texto " * 60 + " Dada en Bogotá a los 15 días del mes de diciembre de 2025. Comuníquese")
+    estado, obs = dictaminar(analizar_texto([sanjose]), 2026)
+    assert estado == "POCOS_VALORES", obs
 
 
 def test_montos_sin_signo_y_solo_incremento():
@@ -206,3 +220,24 @@ def test_uao_tecnologias_es_2025():
     assert (a.tipo_acto, a.numero_acto, a.anio_acto) == ("RESOLUCION", "750", 2024)
     assert a.vigencia == 2025
     assert dictaminar(a, 2026)[0] == "VIGENCIA_DISTINTA"
+
+
+def test_ipc_mas_puntos_es_incremento():
+    cesa = ("EXTRACTO DE ACTA ACTA No. 622 CONSEJO DIRECTIVO 24 DE NOVIEMBRE DE 2025 3. Tarifas 2026 se propone un "
+            "incremento en las matrículas del IPC + 1 para algunos programas " + "texto " * 60 + " Secretaria General")
+    assert dictaminar(analizar_texto([cesa]), 2026)[0] == "SOLO_INCREMENTO"
+
+
+def test_institucion_completa_con_acto_porcentual_y_tabla():
+    import pandas as pd
+    from dpcol.validar_documentos import resumen_institucion
+    docs = pd.DataFrame([
+        {"CODIGO_INSTITUCION": "1709", "INSTITUCION": "CENTRAL", "CARPETA_ANIO": 2026, "ARCHIVO": "acuerdo.pdf",
+         "RUTA": "a", "ESTADO_DOC": "SOLO_INCREMENTO", "ACTO": "ACUERDO 34 de 2025", "FECHA_EXPEDICION": "2025-11-26",
+         "VIGENCIA_DETECTADA": 2026, "VALORES_DINERO": 0, "PROGRAMAS_ENCONTRADOS": 0, "PROGRAMAS_ACTIVOS": 40},
+        {"CODIGO_INSTITUCION": "1709", "INSTITUCION": "CENTRAL", "CARPETA_ANIO": 2026, "ARCHIVO": "tabla.pdf",
+         "RUTA": "b", "ESTADO_DOC": "SIN_ACTO_IDENTIFICADO", "ACTO": "", "FECHA_EXPEDICION": "",
+         "VIGENCIA_DETECTADA": 2026, "VALORES_DINERO": 76, "PROGRAMAS_ENCONTRADOS": 30, "PROGRAMAS_ACTIVOS": 40},
+    ])
+    r = resumen_institucion(docs, 2026).iloc[0]
+    assert (r.ESTADO_INSTITUCION, r.TIPO_FUENTE, r.ACTO_PRINCIPAL) == ("COMPLETO", "acto+tabla", "ACUERDO 34 de 2025")
