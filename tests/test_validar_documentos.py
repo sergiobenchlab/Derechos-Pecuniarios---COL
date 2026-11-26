@@ -124,6 +124,8 @@ from dpcol.validar_documentos import _identificar_acto, _plano
      "POR LA CUAL SE FIJAN LOS VALORES. Que el Consejo Superior en su sesión Acta No. 327 autorizó", "RESOLUCION", "750", 2024),
     ("RESOLUCIÓN RECTORAL Nro. 130 Medellín, noviembre 27 de 2025", "RESOLUCION", "130", None),
     ("ACUERDO DE SALA GENERAL No. 65 DE 2025 (noviembre 28)", "ACUERDO", "65", 2025),
+    ("Universidad Icesi RECTORÍA Resolución No. 1.649 (17 de octubre de 2025) “Por la cual se fijan los derechos",
+     "RESOLUCION", "1649", 2025),
     ("UNIVERSIDAD Resolución de la Presidencia Institucional No 017 de 2025 Por la cual se autoriza el porcentaje de "
      "aumento de matriculas Personeria Juridica No 22195 de 1985 Resolución 1780 de 2010", "RESOLUCION", "017", 2025),
     ("Pontificia Universidad JAVERIANA ACUERDO N”. 781 Valores de Matrícula y Otros Derechos Pecuniarios", "ACUERDO", "781", None),
@@ -301,3 +303,12 @@ def test_fecha_de_sesion_en_encabezado():
     a = analizar_texto(fucs)
     assert (a.numero_acto, a.fecha_expedicion, a.origen_fecha) == ("6813", date(2025, 8, 5), "sesion")
     assert dictaminar(a, 2026)[0] == "FECHA_TEMPRANA"
+
+
+def test_valores_temporales_no_son_el_acto_definitivo():
+    t = ("Universidad Icesi RECTORÍA Resolución No. 1.627 (16 de julio de 2025) “Por la cual se establecen los valores de "
+         "la matrícula financiera temporales para estudiantes nuevos ... para el primer período académico del año 2026, la "
+         "cual tiene vigencia desde el 16 de agosto hasta el 15 de octubre de 2025” " + "Programa $ 12.500.000 " * 10 +
+         " Se expide en Santiago de Cali, a los dieciséis días del mes de julio de 2025. Comuníquese y cúmplase")
+    estado, obs = dictaminar(analizar_texto([t]), 2026)
+    assert estado == "VALORES_TEMPORALES", obs

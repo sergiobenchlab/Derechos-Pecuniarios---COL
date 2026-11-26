@@ -120,3 +120,15 @@ restringida al dominio de la IES, revisión de las páginas de matrículas/derec
 y de las referencias que citan las propias tablas). Las descargas se hacen al equipo local,
 se validan antes de copiarse a `01_DOCUMENTOS/<IES>/2026/`, y quedan registradas en
 `03_SALIDAS/descargas_web.csv` y en el inventario (`ESTADO = DESCARGADO_WEB`, URL en `RUTA_ORIGINAL`).
+
+### Revisión de cierres, firmas y fechas
+
+- El cierre se busca en **todo** el documento con señales fuertes ("Dado en", "Comuníquese",
+  "Cúmplase", "Firmado digitalmente", "El Presidente… El Secretario", "Cordialmente"), porque
+  muchos actos llevan los anexos con las tablas **después** de la firma (Santo Tomás, Comfenalco,
+  UDI, San José…). Las firmas digitales del PDF también cuentan como cierre (Andes, UNIR).
+- Fechas de cierre con año en letras y paréntesis ("…de noviembre, de dos mil veinticinco (2025)")
+  y fecha de **sesión** en el encabezado ("en sesión ordinaria No. 665 del cinco (05) de agosto de 2025").
+- Si el título dice "valores … **temporales**", el acto se marca `VALORES_TEMPORALES` y no se toma
+  como principal (Icesi Res. 1627: valores de inscripción anticipada).
+- Las conclusiones de la revisión manual quedan en `03_SALIDAS/<año>/notas_revision_<año>.csv`.

@@ -97,7 +97,7 @@ _RE_TIPO = re.compile(r"\b" + _TIPOS_ACTO + r"\b")
 _RE_ID = re.compile(
     r"^[\s:]*(?:(?:de|del)?\s*(?:la\s+)?(?:sala general|consejo(?:\s+(?!no\b|nro\b|numero\b)[a-z]+){0,5}|rectoria|consiliatura|junta directiva|presidencia(?: institucional)?)\s*)?"
     r"(?:n(?:o|ro|um|umero)?\s*[.°º:”\x22'*]*\s*(?:o\b\.?\s*)?)?"
-    r"((?:[a-z]{1,4}[\s.]*(?:\d[.\d]*)?\s*[-–]\s*)?\d[\d]*(?:\s*[-–]\s*\d+)*)"
+    r"((?:[a-z]{1,4}[\s.]*(?:\d[.\d]*)?\s*[-–]\s*)?(?:\d{1,3}\.\d{3}(?!\d)|\d[\d]*)(?:\s*[-–]\s*\d+)*)"
 )
 _RE_DADO = re.compile(
     r"(?:dad[oa]|expedid[oa]|aprobad[oa]|firmad[oa])\b[^\n]{0,120}?"
@@ -184,6 +184,7 @@ class Analisis:
     valores_dinero: int
     es_reglamento: bool
     fija_incremento: bool = False
+    es_temporal: bool = False
 
 
 def _fecha(d, mes, a) -> date | None:
@@ -219,6 +220,8 @@ def _identificar_acto(cabecera: str):
                     break
             continue
         ident = re.sub(r"\s+", "", mi.group(1)).strip("-–")
+        if re.fullmatch(r"\d{1,3}\.\d{3}", ident):  # "1.649" -> "1649"
+            ident = ident.replace(".", "")
         if not ident or ident.isdigit() and len(ident) > 5:
             continue
         cola = resto[mi.end(): mi.end() + 80]
@@ -334,13 +337,15 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
         valores_dinero=len(_RE_DINERO.findall(todo)),
         es_reglamento=bool(_RE_REGLAMENTO.search(titulo)),
         fija_incremento=bool(_RE_INCREMENTO.search(todo)),
+        # p. ej. Icesi Res. 1627: "valores de la matrícula financiera temporales ... vigencia hasta el 15 de octubre"
+        es_temporal=bool(re.search(r"\btemporal(?:es)?\b", titulo)),
     )
 
 
 # ---------------------------------------------------------------- dictamen
 
 ORDEN_GRAVEDAD = [
-    "NO_LEGIBLE", "SIN_PRECIOS", "VIGENCIA_DISTINTA", "INCOMPLETO_PAGINAS",
+    "NO_LEGIBLE", "SIN_PRECIOS", "VIGENCIA_DISTINTA", "VALORES_TEMPORALES", "INCOMPLETO_PAGINAS",
     "FECHA_FUERA_DE_RANGO", "SIN_ACTO_IDENTIFICADO", "SIN_FECHA", "SIN_CIERRE",
     "SOLO_INCREMENTO", "POCOS_VALORES", "FECHA_TARDIA", "FECHA_TEMPRANA", "VIGENCIA_NO_EXPLICITA", "OK",
 ]
@@ -365,6 +370,9 @@ def dictaminar(a: Analisis, anio_objetivo: int, min_valores: int = 3) -> tuple[s
         obs.append("VIGENCIA_NO_EXPLICITA")
     elif a.vigencia != anio_objetivo:
         obs.append("VIGENCIA_DISTINTA")
+    if a.es_temporal:
+        obs.append("VALORES_TEMPORALES")
+        obs.append("fija valores temporales (p. ej. inscripción anticipada); buscar el acto definitivo")
     if a.paginas_declaradas and a.paginas_declaradas > a.paginas:
         obs.append("INCOMPLETO_PAGINAS")
     if not a.tipo_acto:
@@ -522,9 +530,10 @@ def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:
         else:
             estado = "FALTA_ACTO"
         base_mejor = limpios if len(limpios) else validos
-        # prioriza documentos con acto identificado
-        mejor = base_mejor.assign(_t=base_mejor["ACTO"].fillna("").astype(str).str.len() > 0) \
-            .sort_values("_t", ascending=False, kind="stable").head(1)
+        # prioriza documentos con acto identificado y, entre ellos, el más reciente
+        mejor = base_mejor.assign(_t=base_mejor["ACTO"].fillna("").astype(str).str.len() > 0,
+                                  _f=base_mejor["FECHA_EXPEDICION"].fillna("").astype(str)) \
+            .sort_values(["_t", "_f"], ascending=[False, False], kind="stable").head(1)
         enc = pd.to_numeric(validos.get("PROGRAMAS_ENCONTRADOS"), errors="coerce").max() if len(validos) else None
         tot = pd.to_numeric(g.get("PROGRAMAS_ACTIVOS"), errors="coerce").max()
         filas.append({
