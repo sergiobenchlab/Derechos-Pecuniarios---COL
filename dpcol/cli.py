@@ -16,6 +16,7 @@ from .maestro import cargar_maestro, cargar_periodos
 from .normalizar import Parametros, normalizar
 from .organizar import maestro_instituciones, organizar, resumen_por_institucion
 from .validar import a_revisar, cobertura_por_ies, resumen_estados, variacion_anual
+from .validar_documentos import programas_activos_por_institucion, validar_carpeta
 
 
 def _cmd_normalizar(a: argparse.Namespace) -> int:
@@ -77,6 +78,22 @@ def _cmd_organizar(a: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_validar_documentos(a: argparse.Namespace) -> int:
+    programas = programas_activos_por_institucion(leer_base(a.base)) if a.base else None
+    docs, res = validar_carpeta(
+        Path(a.documentos), a.anio, programas_por_inst=programas,
+        cache=Path(a.cache) if a.cache else None, ocr=not a.sin_ocr,
+        solo=set(a.solo) if a.solo else None,
+    )
+    out = Path(a.salida)
+    escribir_csv(docs, out / f"validacion_documentos_{a.anio}.csv")
+    escribir_csv(res, out / f"validacion_instituciones_{a.anio}.csv")
+    print(f"{len(docs)} documentos de {len(res)} instituciones")
+    print(docs["ESTADO_DOC"].value_counts().to_string())
+    print(res["ESTADO_INSTITUCION"].value_counts().to_string())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="dpcol", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -105,6 +122,16 @@ def main(argv: list[str] | None = None) -> int:
     o.add_argument("--inventario", default=None)
     o.add_argument("--simular", action="store_true", help="No copia; solo genera el inventario")
     o.set_defaults(func=_cmd_organizar)
+
+    v = sub.add_parser("validar-documentos", help="Verifica que los actos de un año sean los correctos y estén completos")
+    v.add_argument("--documentos", required=True, help="Carpeta 01_DOCUMENTOS")
+    v.add_argument("--anio", type=int, required=True, help="Año de precios a validar (p. ej. 2026)")
+    v.add_argument("--base", default=None, help="Base ancha para medir cobertura de programas activos")
+    v.add_argument("--salida", required=True)
+    v.add_argument("--cache", default=None, help="Carpeta para guardar el texto extraído/OCR y no repetirlo")
+    v.add_argument("--sin-ocr", action="store_true")
+    v.add_argument("--solo", nargs="*", help="Códigos de institución a validar")
+    v.set_defaults(func=_cmd_validar_documentos)
 
     a = ap.parse_args(argv)
     return a.func(a)

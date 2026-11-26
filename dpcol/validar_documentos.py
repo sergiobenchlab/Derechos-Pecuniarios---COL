@@ -142,7 +142,7 @@ class Analisis:
 def _fecha(d, mes, a) -> date | None:
     try:
         return date(int(a), MESES[mes], int(d))
-    except (ValueError, KeyError):
+    except (ValueError, KeyError, TypeError):
         return None
 
 
@@ -318,6 +318,9 @@ def validar_carpeta(
                     continue
                 a = analizar_texto(paginas, usados)
                 estado, obs = dictaminar(a, anio_objetivo)
+                if anio != anio_objetivo and a.vigencia == anio:
+                    # acto del año de su carpeta (p. ej. precios 2025 en 2025/): correcto, no es del objetivo
+                    estado, obs = "OTRO_ANIO_OK", [f"acto de precios {anio}, bien ubicado"]
                 vistos = total = None
                 if programas_por_inst and cod in programas_por_inst:
                     vistos, total = cobertura_programas("\n".join(paginas), programas_por_inst[cod])
@@ -374,8 +377,19 @@ def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:
             "FECHA_EXPEDICION": mejor["FECHA_EXPEDICION"].iat[0] if len(mejor) else "",
             "ARCHIVO_PRINCIPAL": mejor["RUTA"].iat[0] if len(mejor) else "",
             "MAX_PROGRAMAS_ENCONTRADOS_EN_UN_DOC": enc, "PROGRAMAS_ACTIVOS": tot,
-            "PROBLEMAS": "; ".join(sorted(set(g.loc[~g["ESTADO_DOC"].isin(["OK"]), "ESTADO_DOC"]))),
+            "PROBLEMAS": "; ".join(sorted(set(g.loc[~g["ESTADO_DOC"].isin(["OK", "OTRO_ANIO_OK"]), "ESTADO_DOC"]))),
         })
     orden = {"FALTA_ACTO": 0, "SOLO_TABULAR": 1, "REVISAR": 2, "COMPLETO": 3}
     out = pd.DataFrame(filas)
     return out.sort_values("ESTADO_INSTITUCION", key=lambda s: s.map(orden)).reset_index(drop=True)
+
+
+def programas_activos_por_institucion(base: pd.DataFrame) -> dict[str, list[str]]:
+    """CÓDIGO_INSTITUCIÓN_PADRE -> nombres de programas activos, desde la base ancha."""
+    b = base.copy()
+    b.columns = [str(c).strip() for c in b.columns]
+    estado = b.get("ESTADO_OFICIAL", b.get("ESTADO"))
+    if estado is not None:
+        b = b[estado.astype(str).str.strip().str.lower() == "activo"]
+    cod = pd.to_numeric(b["CÓDIGO_INSTITUCIÓN_PADRE"], errors="coerce").astype("Int64").astype(str)
+    return b.assign(_c=cod).groupby("_c")["NOMBRE_DEL_PROGRAMA"].apply(lambda s: sorted(set(s.dropna().astype(str)))).to_dict()
