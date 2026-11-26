@@ -61,6 +61,9 @@ def _preparar(df: pd.DataFrame, periodos: pd.DataFrame) -> pd.DataFrame:
     d["ANIO"] = d["ID_PRD"].map(anio)
     d["PRD_PRC_ORIGINAL"] = d.get("PRD_PRC", pd.Series(index=d.index, dtype=object))
     d["UNIDAD_DECLARADA"] = d["PRD_PRC_ORIGINAL"].map(unidad_canonica)
+    # Precios con centavos no son publicados por las IES: suelen ser
+    # proyecciones o cálculos intermedios que quedaron en la base.
+    d["PRC_CON_DECIMALES"] = d["PRC"].notna() & ((d["PRC"] - d["PRC"].round()).abs() > 0.004)
     return d
 
 
@@ -157,7 +160,16 @@ def normalizar(
                 dist = abs(math.log(rr))
                 if mejor is None or dist < mejor[0]:
                     mejor = (dist, u, fu, ru, su, rr)
-            if mejor and lo_re <= mejor[5] <= hi_re:
+            ambiguo_anual = (
+                mejor is not None and unidad == "Semestral" and mejor[1] == "Anual"
+                and meses_periodicidad(peri)[0] == 12
+            )
+            if ambiguo_anual:
+                # Programa anual con precio "Semestral" igual al SNIES anual: puede
+                # ser la etiqueta o la periodicidad del maestro. No se decide solo.
+                notas.append(f"programa anual: precio declarado semestral ≈ SNIES anual (H/SNIES={ratio:.2f}); confirmar en la fuente")
+                estado = "REVISAR_PERIODICIDAD"
+            elif mejor and lo_re <= mejor[5] <= hi_re:
                 _, u, f, regla_u, supuesto, ratio = mejor
                 notas.append(f"declarada {unidad} daba H/SNIES={h / ref:.2f}; se reinterpreta como {u}")
                 regla = regla_u
@@ -194,7 +206,7 @@ def normalizar(
     orden_audit = [
         "ANIO", "NOMBRE_PROGRAMA", "NIVEL", "PRD_PRC_ORIGINAL", "UNIDAD_DECLARADA", "UNIDAD_APLICADA",
         "FACTOR", "CREDITOS", "PERIODOS", "PERIODICIDAD", "PRC_SNIES", "PRC_SNIES_SEM", "RATIO_SNIES",
-        "ESTADO", "REGLA", "SUPUESTO_PERIODICIDAD", "EN_MAESTRO", "PRC_ORIGINAL_TXT",
+        "ESTADO", "REGLA", "SUPUESTO_PERIODICIDAD", "EN_MAESTRO", "PRC_CON_DECIMALES", "PRC_ORIGINAL_TXT",
     ]
     resto = [c for c in extras if c not in orden_audit]
     return d[T08_COLUMNAS + [c for c in orden_audit if c in d.columns] + resto]

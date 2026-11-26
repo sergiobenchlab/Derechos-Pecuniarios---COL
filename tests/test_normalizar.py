@@ -136,3 +136,18 @@ def test_variacion_anual():
     assert v.loc[59, "VAR_ANUAL"] == pytest.approx(0.05)
     assert not v.loc[59, "ALERTA_VARIACION"]
     assert v.loc[61, "ALERTA_VARIACION"]
+
+
+def test_programa_anual_precio_semestral_ambiguo():
+    d = run([fila(3, 61, 40_000_000, "DERECHOS PECUNIARIOS", "Semestral"),
+             fila(3, 61, 40_000_000, "SNIES", "Anual")])
+    r = d.loc[(3, 61, "DERECHOS PECUNIARIOS")]
+    assert r.ESTADO == "REVISAR_PERIODICIDAD"
+    assert r.PRC_HMGNZD == 40_000_000  # no se cambia sin evidencia
+
+
+def test_marca_decimales():
+    d = run([fila(1, 61, "5311993,547", "DERECHOS PECUNIARIOS", "Semestral")])
+    r = d.loc[(1, 61, "DERECHOS PECUNIARIOS")]
+    assert r.PRC == pytest.approx(5311993.547)
+    assert r.PRC_CON_DECIMALES

@@ -2,12 +2,14 @@
 
     python -m dpcol normalizar --entrada T08_PRECIOS.csv --maestro "Precios 2026(Base con histórico).csv" --salida data/salidas/2026
     python -m dpcol normalizar --entrada PRECIOS_2026_AUDITORIA.xlsx --formato ancho --maestro PRECIOS_2026_AUDITORIA.xlsx --salida data/salidas/2026
+    python -m dpcol catalogo --base PRECIOS_2026_AUDITORIA.xlsx --anio 2027
 """
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
+from .catalogo import catalogo_inicial, fusionar, guardar
 from .desde_ancho import ancho_a_largo, leer_base
 from .io import escribir_csv, escribir_t08, leer_csv
 from .maestro import cargar_maestro, cargar_periodos
@@ -48,6 +50,16 @@ def _cmd_normalizar(a: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_catalogo(a: argparse.Namespace) -> int:
+    base = leer_base(a.base)
+    cat = catalogo_inicial(base, a.anio, a.anio_ref)
+    destino = Path(a.salida)
+    cat = fusionar(destino, cat)
+    guardar(cat, destino)
+    print(f"Catálogo con {len(cat)} filas en {destino}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="dpcol", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -61,6 +73,13 @@ def main(argv: list[str] | None = None) -> int:
     n.add_argument("--anios", type=int, nargs="*", help="Filtrar años en la salida (p. ej. 2026)")
     n.add_argument("--homogeneizar-snies", action="store_true", help="Llenar también PRC_HMGNZD en filas SNIES")
     n.set_defaults(func=_cmd_normalizar)
+
+    c = sub.add_parser("catalogo", help="Crea/actualiza el catálogo de fuentes por IES para un año")
+    c.add_argument("--base", required=True, help="Base ancha de trabajo (p. ej. PRECIOS_2026_AUDITORIA.xlsx)")
+    c.add_argument("--anio", type=int, required=True, help="Año a recolectar (p. ej. 2027)")
+    c.add_argument("--anio-ref", type=int, default=None, help="Año del que se toman las fuentes previas (por defecto anio-1)")
+    c.add_argument("--salida", default="fuentes/catalogo_fuentes.csv")
+    c.set_defaults(func=_cmd_catalogo)
 
     a = ap.parse_args(argv)
     return a.func(a)

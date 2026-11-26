@@ -21,3 +21,21 @@ def test_cli_ancho_a_t08(tmp_path):
     assert r.PRC_HMGNZD == "4500000"
     assert r.ID_PRD == "61" and r.FCH_INC_PRD == "46023"
     assert (out / "a_revisar.csv").exists()
+
+
+def test_catalogo(tmp_path):
+    base = tmp_path / "base.csv"
+    base.write_text(
+        "ID_IES;CÓDIGO_INSTITUCIÓN_PADRE;NOMBRE_INSTITUCIÓN;ID_PRGRM;ESTADO_OFICIAL;FUENTE_2026\n"
+        "72;1701;JAVERIANA;1;Activo;PDF_A\n295;1701;JAVERIANA;2;Inactivo;PDF_B\n92;1826;UAN;3;Activo;\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "cat.csv"
+    assert main(["catalogo", "--base", str(base), "--anio", "2027", "--salida", str(out)]) == 0
+    cat = leer_csv(out)
+    j = cat[cat.CODIGO_INSTITUCION == "1701"].iloc[0]
+    assert j.IDS_IES == "72 295"
+    assert j.PROGRAMAS_ACTIVOS == "1" and j.FUENTES_ANIO_ANTERIOR == "PDF_A | PDF_B" and j.ESTADO == "PENDIENTE"
+    # no duplica al correr de nuevo
+    main(["catalogo", "--base", str(base), "--anio", "2027", "--salida", str(out)])
+    assert len(leer_csv(out)) == 2

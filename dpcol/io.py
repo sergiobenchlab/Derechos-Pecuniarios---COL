@@ -78,9 +78,10 @@ def parsear_numero(valor) -> float:
     - Se eliminan '$', espacios y cualquier símbolo.
     - Si aparecen '.' y ',', el separador que va de último es el decimal.
     - Si aparece un solo tipo de separador repetido, es de miles.
-    - Si aparece una sola vez seguido de exactamente 3 dígitos, es de miles
-      (los precios en COP no tienen tres decimales).
-    - En otro caso es decimal ("14142600,0" -> 14142600.0).
+    - Si aparece una sola vez, es de miles solo si a la izquierda hay 1-3
+      dígitos y a la derecha exactamente 3 ("658,500" -> 658500). En otro caso
+      es decimal ("14142600,0" -> 14142600.0; "5311993,547" -> 5311993.547,
+      valor estimado con decimales presente en el T08 2026).
     """
     if valor is None:
         return math.nan
@@ -96,7 +97,8 @@ def parsear_numero(valor) -> float:
     elif "," in s or "." in s:
         sepr = "," if "," in s else "."
         partes = s.split(sepr)
-        if len(partes) > 2 or len(partes[-1]) == 3:
+        es_miles = len(partes) > 2 or (len(partes[-1]) == 3 and 1 <= len(partes[0].lstrip("-")) <= 3)
+        if es_miles:
             s = s.replace(sepr, "")
         else:
             s = s.replace(sepr, ".")
