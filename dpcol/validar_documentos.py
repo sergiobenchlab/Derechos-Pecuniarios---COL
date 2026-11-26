@@ -518,8 +518,13 @@ def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:
                      # el propio acto trae valores (p. ej. valor único de matrícula para todos los programas)
                      or bool((pd.to_numeric(actos_pct.get("VALORES_DINERO"), errors="coerce").fillna(0) >= 1).any()))
         tipo_fuente = ""
+        tempranos = validos[validos["ESTADO_DOC"] == "FECHA_TEMPRANA"]
         if len(limpios):
             estado, tipo_fuente = "COMPLETO", "acto"
+        elif len(tempranos):
+            # acto válido del año, expedido antes de noviembre de N-1 (decisión Benchlab: cuenta como completo)
+            estado, tipo_fuente = "COMPLETO", "acto_fecha_temprana"
+            limpios = tempranos
         elif len(actos_pct) and hay_tabla:
             estado, tipo_fuente = "COMPLETO", "acto+tabla"
             limpios = actos_pct

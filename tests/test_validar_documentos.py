@@ -312,3 +312,14 @@ def test_valores_temporales_no_son_el_acto_definitivo():
          " Se expide en Santiago de Cali, a los dieciséis días del mes de julio de 2025. Comuníquese y cúmplase")
     estado, obs = dictaminar(analizar_texto([t]), 2026)
     assert estado == "VALORES_TEMPORALES", obs
+
+
+def test_acto_con_fecha_temprana_cuenta_como_completo():
+    import pandas as pd
+    from dpcol.validar_documentos import resumen_institucion
+    docs = pd.DataFrame([{"CODIGO_INSTITUCION": "2810", "INSTITUCION": "CUC", "CARPETA_ANIO": 2026, "ARCHIVO": "a.pdf",
+                          "RUTA": "a", "ESTADO_DOC": "FECHA_TEMPRANA", "ACTO": "ACUERDO cd-644 de 2025",
+                          "FECHA_EXPEDICION": "2025-09-24", "VIGENCIA_DETECTADA": 2026, "VALORES_DINERO": 300,
+                          "PROGRAMAS_ENCONTRADOS": 50, "PROGRAMAS_ACTIVOS": 60}])
+    r = resumen_institucion(docs, 2026).iloc[0]
+    assert (r.ESTADO_INSTITUCION, r.TIPO_FUENTE) == ("COMPLETO", "acto_fecha_temprana")

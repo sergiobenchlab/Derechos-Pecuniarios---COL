@@ -94,6 +94,19 @@ def _cmd_validar_documentos(a: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_panorama_snies(a: argparse.Namespace) -> int:
+    from .panorama import cargar_y_calcular
+
+    prog, inst, nac = cargar_y_calcular(a.snies, a.base, a.auditoria, a.validacion, a.anio)
+    out = Path(a.salida)
+    escribir_csv(prog, out / f"panorama_snies_programas_{a.anio}.csv")
+    escribir_csv(inst, out / f"panorama_snies_instituciones_{a.anio}.csv")
+    escribir_csv(nac, out / f"panorama_snies_resumen_{a.anio}.csv")
+    print(nac.to_string(index=False))
+    print(prog["CLASE"].value_counts().to_string())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="dpcol", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -132,6 +145,15 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("--sin-ocr", action="store_true")
     v.add_argument("--solo", nargs="*", help="Códigos de institución a validar")
     v.set_defaults(func=_cmd_validar_documentos)
+
+    ps = sub.add_parser("panorama-snies", help="Compara costos SNIES (HECAA) con precios DP por programa e institución")
+    ps.add_argument("--snies", required=True, help="Programas.xlsx descargado de la consulta pública HECAA")
+    ps.add_argument("--base", required=True, help="Base ancha (mapa ID_PRGRM <-> código SNIES)")
+    ps.add_argument("--auditoria", required=True, help="auditoria_completa.csv de dpcol normalizar")
+    ps.add_argument("--validacion", default=None, help="validacion_instituciones_<año>.csv")
+    ps.add_argument("--anio", type=int, required=True)
+    ps.add_argument("--salida", required=True)
+    ps.set_defaults(func=_cmd_panorama_snies)
 
     a = ap.parse_args(argv)
     return a.func(a)

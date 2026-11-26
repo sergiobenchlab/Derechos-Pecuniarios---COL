@@ -132,3 +132,22 @@ se validan antes de copiarse a `01_DOCUMENTOS/<IES>/2026/`, y quedan registradas
 - Si el título dice "valores … **temporales**", el acto se marca `VALORES_TEMPORALES` y no se toma
   como principal (Icesi Res. 1627: valores de inscripción anticipada).
 - Las conclusiones de la revisión manual quedan en `03_SALIDAS/<año>/notas_revision_<año>.csv`.
+
+
+## Actos con fecha temprana
+
+Un acto válido para el año N expedido antes de noviembre de N‑1 cuenta como fuente completa
+(`TIPO_FUENTE = acto_fecha_temprana`); se conserva la marca `FECHA_TEMPRANA` en el documento.
+
+## Panorama SNIES (`dpcol panorama-snies`)
+
+SNIES publica, por programa, el `COSTO_MATRÍCULA_ESTUD_NUEVOS` que reporta cada IES (consulta
+pública HECAA → "Descargar programas"). No es necesariamente el precio del acto, pero sirve de
+referencia. Por programa se lleva a equivalente semestral con la periodicidad de SNIES, se compara
+con el precio DP y se clasifica: `DP_IGUAL_SNIES` (±0,2 %), `DP_CERCA_SNIES` (±10 %),
+`DP_DIFERENCIA_MEDIA` (±20 %), `DP_DIFERENCIA_ALTA`, `DP_PROYECTADO` (precio con decimales),
+`SIN_DP`, `SIN_SNIES`. Por institución: programas activos en SNIES, cobertura DP, conteos por
+clase, mediana DP/SNIES, cuántos costos SNIES cambiaron frente a la base y estado del documento.
+
+Lectura: un precio DP idéntico a SNIES puede significar que la IES reporta a SNIES el valor de
+su acto o que la base se llenó con SNIES; solo la extracción del acto lo resuelve.

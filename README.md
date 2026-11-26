@@ -15,6 +15,8 @@ dpcol/                         código (python -m dpcol ...)
   desde_ancho.py               base ancha de trabajo → formato largo
   catalogo.py                  catálogo de fuentes por institución
   organizar.py                 copia documentos a <CÓDIGO>-<IES>/<AÑO>/ con inventario y detección de duplicados
+  validar_documentos.py        verifica acto, fecha, vigencia, páginas y firmas de los documentos de un año (con OCR)
+  panorama.py                  cruza costos SNIES (consulta pública HECAA) con precios DP por programa e institución
 data/raw|staging|salidas       datos locales (no se versionan)
 docs/METODOLOGIA.md            reglas, estados y hallazgos
 tests/                         pruebas (pytest)
@@ -34,6 +36,16 @@ python -m dpcol normalizar --entrada PRECIOS_2026_AUDITORIA.xlsx --formato ancho
 
 # Crear/actualizar el catálogo de fuentes de 2027
 python -m dpcol catalogo --base PRECIOS_2026_AUDITORIA.xlsx --anio 2027
+
+# Validar los documentos de un año (OCR en caché)
+python -m dpcol validar-documentos --documentos 01_DOCUMENTOS --anio 2026 --base 02_BASES/PRECIOS_2026_AUDITORIA.xlsx \
+    --salida 03_SALIDAS/2026 --cache 03_SALIDAS/_texto_documentos
+
+# Panorama SNIES vs. derechos pecuniarios
+# (Programas.xlsx = botón "Descargar programas" en hecaa.mineducacion.gov.co/consultaspublicas/programas)
+python -m dpcol panorama-snies --snies 02_BASES/SNIES/Programas.xlsx --base 02_BASES/PRECIOS_2026_AUDITORIA.xlsx \
+    --auditoria 03_SALIDAS/2026/auditoria_completa.csv --validacion 03_SALIDAS/2026/validacion_instituciones_2026.csv \
+    --anio 2026 --salida 03_SALIDAS/2026
 
 # Organizar documentos fuente (copia; nunca mueve ni borra originales)
 python -m dpcol organizar --fuente PDF --fuente "Derechos Pecuniarios/ULT. COMPILADO" \
