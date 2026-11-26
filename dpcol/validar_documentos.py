@@ -90,7 +90,7 @@ _TIPOS_ACTO = r"(acuerdo|resolucion(?: rectoral| de rectoria| de consiliatura)?|
 _RE_TIPO = re.compile(r"\b" + _TIPOS_ACTO + r"\b")
 # identificador tras el tipo: "no. 65", "nro. 130", "no.19", "dp-033-2025", "cd-037-2025", "r – 2025 – 032", "s.1.1- 1954", "114"
 _RE_ID = re.compile(
-    r"^[\s:]*(?:(?:de\s+)?(?:la\s+)?(?:sala general|consejo(?: superior| directivo| academico| administrativo y financiero general)?|rectoria|consiliatura|junta directiva)\s*)?"
+    r"^[\s:]*(?:(?:de|del)?\s*(?:la\s+)?(?:sala general|consejo(?:\s+(?!no\b|nro\b|numero\b)[a-z]+){0,5}|rectoria|consiliatura|junta directiva)\s*)?"
     r"(?:n(?:o|ro|um|umero)?\s*[.°º:]?\s*)?"
     r"((?:[a-z]{1,4}[\s.]*(?:\d[.\d]*)?\s*[-–]\s*)?\d[\d]*(?:\s*[-–]\s*\d+)*)"
 )
@@ -106,9 +106,25 @@ _RE_PAGINA = re.compile(r"pagina\s*(\d{1,3})\s*(?:de|/)\s*(\d{1,3})")
 _RE_CIERRE = re.compile(r"(dad[oa] en|comuniquese|publiquese|cumplase|para constancia|firman?\b|secretari[oa] general|rector)")
 _RE_DINERO = re.compile(r"\$\s*\d{1,3}(?:['’]\d{3})?(?:[.,\s]\d{3})+|(?<![\d.,'’])\d{1,3}(?:['’]\d{3})?(?:[.,]\d{3})+(?![\d.,]*\d)")
 _RE_POR_CUAL = re.compile(r"por (?:el|la|medio de la|medio del|medio de el) cual|por medio de la presente|se (?:fija|establece|aprueba|determina)")
-_RE_NO_ES_ACTO = re.compile(r"(personeria|mediante|segun|conforme a|modificad[oa] por|derogad[oa]|reconocid[oa])[^\n]{0,40}$")
+_RE_NO_ES_ACTO = re.compile(r"(personeria|mediante|segun|conforme a|modificad[oa] por|derogad[oa]|reconocid[oa])[^\n]{0,20}$")
 _RE_INCREMENTO = re.compile(r"increment\w*[^%]{0,120}?\d{1,2}(?:[.,]\d{1,2})?\s*%|\(\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\s*\)")
 _RE_REGLAMENTO = re.compile(r"\breglamento\b")
+
+
+_RE_VIG_TITULO = re.compile(
+    r"(?:para el|vigencia(?: del?)?|(?:tarifas|valores|precios|derechos pecuniarios|matriculas?)(?:\s+[a-z]+){0,3})"
+    r"\s+(?:ano\s+|periodo\s+|periodo academico\s+)?(20\d{2})"
+)
+
+
+def _vigencia_titulo(t: str, base: int | None) -> int | None:
+    """Primera vigencia mencionada en el título (p. ej. "TARIFAS SEDE CENTRAL 2025",
+    "...PARA EL AÑO 2026"), ignorando años anteriores al acto."""
+    for m in _RE_VIG_TITULO.finditer(t):
+        a = int(m.group(1))
+        if base is None or a >= base:
+            return a
+    return None
 
 
 def _vigencias(t: str) -> Counter:
@@ -164,7 +180,8 @@ def _identificar_acto(cabecera: str):
     que sigue ("de 2025", "(1 de diciembre de 2025)").
     """
     candidatos = []
-    for mt in _RE_TIPO.finditer(cabecera):
+    menciones = list(_RE_TIPO.finditer(cabecera))
+    for k, mt in enumerate(menciones):
         antes = cabecera[max(0, mt.start() - 60): mt.start()]
         if _RE_NO_ES_ACTO.search(antes):
             continue
@@ -184,7 +201,10 @@ def _identificar_acto(cabecera: str):
             ma = re.match(r"\s*(?:\(|de|del|-)?\s*(?:(?:\d{1,2}\s+de\s+)?(?:" + _M + r")(?:\s+\d{1,2})?\s*(?:de|del|,)?\s*)?(20[1-3]\d)", cola)
             if ma:
                 anio = int(ma.group(1))
-        titulo = bool(_RE_POR_CUAL.search(cabecera[mt.end(): mt.end() + 400]))
+        # "por el/la cual" debe aparecer antes de la siguiente mención de acto
+        # (evita tomar "Resolución 015 MINEDUCACIÓN" del membrete como título)
+        fin = min(mt.end() + 400, menciones[k + 1].start() if k + 1 < len(menciones) else len(cabecera))
+        titulo = bool(_RE_POR_CUAL.search(cabecera[mt.end(): fin]))
         tipo = mt.group(1).split()[0].upper()
         candidatos.append((not titulo, mt.start(), (tipo, ident, anio, mt)))
         if titulo:
@@ -237,10 +257,11 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
     vig = _vigencias(todo)
     vigencia = None
     base = anio_acto or (fecha.year if fecha else None)
-    vig_titulo = {a: n for a, n in _vigencias(cabecera[:1500]).items() if base is None or a >= base}
+    # el título manda: se busca en el texto tras el tipo de acto (o al inicio si no hay acto)
+    inicio = m.start() if m else 0
+    vig_titulo = _vigencia_titulo(cabecera[inicio: inicio + 700], base)
     if vig_titulo:
-        # lo que dice el título del acto ("...para el año 2026") manda
-        vigencia = max(vig_titulo, key=lambda a: (vig_titulo[a], a))
+        vigencia = vig_titulo
     elif vig:
         candidatos = {a: n for a, n in vig.items() if base is None or a >= base}
         if fecha and fecha.month >= 9 and candidatos.get(fecha.year + 1):

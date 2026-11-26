@@ -120,8 +120,14 @@ from dpcol.validar_documentos import _identificar_acto, _plano
     ("Resolución No. 023 2 de diciembre de 2025 Por medio de la cual modifica", "RESOLUCION", "023", 2025),
     ("Derechos Pecuniarios ACUERDO CD-037-2025 Estos valores entran en vigencia", "ACUERDO", "cd-037-2025", 2025),
     ("CONSEJO SUPERIOR Acuerdo No. 047 de 2025 (5 de diciembre) Por el cual", "ACUERDO", "047", 2025),
+    ("Personería jurídica, Res. No. 0618 de 1970. RESOLUCIÓN DEL CONSEJO SUPERIOR No. 750 DEL 05 DE NOVIEMBRE DE 2024 "
+     "POR LA CUAL SE FIJAN LOS VALORES. Que el Consejo Superior en su sesión Acta No. 327 autorizó", "RESOLUCION", "750", 2024),
     ("RESOLUCIÓN RECTORAL Nro. 130 Medellín, noviembre 27 de 2025", "RESOLUCION", "130", None),
     ("ACUERDO DE SALA GENERAL No. 65 DE 2025 (noviembre 28)", "ACUERDO", "65", 2025),
+    ("Personería Jurídica: RES. 2085 de 1987 del MEN RES. 1904 del MEN, 5 de Agosto de 2002 ACUERDO DEL CONSEJO DE "
+     "FUNDADORES 002 (25 de noviembre de 2025) POR EL CUAL SE DETERMINAN LOS VALORES", "ACUERDO", "002", 2025),
+    ("ACREDITACIÓN INSTITUCIONAL UNIVERSIDAD SIMÓN BOLÍVAR ALTA CALIDAD Resolución 015 MINEDUCACIÓN BARRANQUILLA "
+     "ACUERDO DE SALA GENERAL No. 51 DE 2024 (noviembre 29) POR EL CUAL SE FIJAN LOS VALORES", "ACUERDO", "51", 2024),
     ("Vigilada MEN. Personería jurídica: Resolución 9168 del 6 de agosto de 1987. CONSEJO SUPERIOR TecMD "
      "ACUERDO No 058 (27 de noviembre 2025) POR MEDIO DE LA CUAL SE DETERMINAN LOS DERECHOS", "ACUERDO", "058", 2025),
     ("RESOLUCIÓN CONSEJO DIRECTIVO No 20-2025 Por la cual se establece el valor de la Matricula", "RESOLUCION", "20-2025", 2025),
@@ -171,3 +177,23 @@ def test_vigencia_no_se_confunde_con_columna_del_anio_anterior():
          + "x " * 800 + cuerpo + " Dado en Medellín a los 28 días del mes de noviembre de 2025. Comuníquese")
     a = analizar_texto([t])
     assert a.vigencia == 2026
+
+
+def test_tabla_de_tarifas_upb_titulo_manda():
+    # UPB "TARIFAS SEDE CENTRAL 2025": cada fila cita el acto "RRG No 083/2024"
+    fila = "1205 RRG No 083/2024 Arquitectura MEDELLIN 10 164 17 6,50% $ 796.700 $ 13.543.900 $ 13.065.880 "
+    t = ("TARIFAS SEDE CENTRAL 2025 Pregrado Presencial Incremento con base en las tarifas 2024 Valor Crédito 2025 "
+         "Valor Primer Semestre 2025 " + fila * 40)
+    assert analizar_texto([t]).vigencia == 2025
+
+
+def test_uao_tecnologias_es_2025():
+    t = ("Personería jurídica, Res. No. 0618, de la Gobernación del Valle del Cauca del 20 de Febrero de 1970. "
+         "RESOLUCIÓN DEL CONSEJO SUPERIOR No. 750 DEL 05 DE NOVIEMBRE DE 2024 POR LA CUAL SE FIJAN LOS DERECHOS "
+         "PECUNIARIOS PARA LOS PROGRAMAS ACADÉMICOS DE NIVEL TECNOLÓGICO, PARA EL AÑO 2025 Que el Consejo Superior "
+         "en su sesión del 05 de noviembre de 2024 Acta No. 327 " + "$225.580 " * 10 +
+         "Dada en Santiago de Cali, a los cinco (05) días del mes de noviembre del año dos mil veinticuatro (2024).")
+    a = analizar_texto([t])
+    assert (a.tipo_acto, a.numero_acto, a.anio_acto) == ("RESOLUCION", "750", 2024)
+    assert a.vigencia == 2025
+    assert dictaminar(a, 2026)[0] == "VIGENCIA_DISTINTA"
