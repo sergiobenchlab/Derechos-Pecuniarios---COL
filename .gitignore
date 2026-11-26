@@ -1,0 +1,16 @@
+# Datos: nunca se versionan (pesan, cambian y pueden contener información interna)
+data/raw/*
+data/staging/*
+data/salidas/*
+!data/*/.gitkeep
+*.xlsx
+*.xls
+*.pdf
+!tests/fixtures/**
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.ipynb_checkpoints/
+.DS_Store
