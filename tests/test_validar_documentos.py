@@ -241,3 +241,63 @@ def test_institucion_completa_con_acto_porcentual_y_tabla():
     ])
     r = resumen_institucion(docs, 2026).iloc[0]
     assert (r.ESTADO_INSTITUCION, r.TIPO_FUENTE, r.ACTO_PRINCIPAL) == ("COMPLETO", "acto+tabla", "ACUERDO 34 de 2025")
+
+
+def test_cierre_en_medio_y_fecha_en_letras():
+    # Antonio Nariño: acto firmado en la pág. 7 con fecha en letras y comas
+    acto = ("ACUERDO No. 49 de 2025 SECRETARIA GENERAL POR EL CUAL SE APRUEBAN LOS VALORES DE MATRÍCULA ... EN EL AÑO 2026 "
+            + "Programa 4.500.000 " * 10)
+    cierre = ("Comuníquese y Cúmplase. Dado en Bogotá, D.C., a los veintiún (21) días, del mes de noviembre, de dos mil "
+              "veinticinco (2025). MARY FALK LOSADA Presidente de Consejo")
+    a = analizar_texto([acto, cierre])
+    assert a.fecha_expedicion == date(2025, 11, 21)
+    assert dictaminar(a, 2026)[0] == "OK"
+    # Santo Tomás: acto firmado en la pág. 2 y 33 páginas de anexos sin cierre
+    anexo = "DIRECCIÓN DE TESORERÍA DERECHOS PECUNIARIOS CASILLEROS 19.800 $ 5,1% 20.800 $ " * 5
+    st = ["ACUERDO No.19 (1 de diciembre de 2025) Por el cual se fijan los valores para el año 2026",
+          "Dado en Bogotá a 1 de diciembre de 2025. Comuníquese y cúmplase. Presidente Secretario General"] + [anexo] * 33
+    assert analizar_texto(st).tiene_cierre
+
+
+def test_acto_despues_de_portada():
+    # FUCS: portada-imagen y tablas antes del texto del Acuerdo
+    pags = ["DERECHOS PECUNIARIOS FUCS 2026"] + ["Medicina $ 29.576.000 $ 29.576.000"] * 3 + [
+        "ACUERDO No. 6813 Por el cual se fijan los derechos pecuniarios para el año 2026 EL CONSEJO SUPERIOR ...",
+        "Dado en Bogotá a los 25 días del mes de noviembre de 2025. Comuníquese y cúmplase. Presidente Secretario"]
+    a = analizar_texto(pags)
+    assert (a.tipo_acto, a.numero_acto) == ("ACUERDO", "6813")
+    assert a.fecha_expedicion == date(2025, 11, 25)
+
+
+@pytest.mark.parametrize("cierre,esperada", [
+    ("Comuníquese y Cúmplase. Dado en Bogotá, D.C., a los veintiún (21) días, del mes de noviembre, de dos mil veinticinco\n\n(2025).",
+     date(2025, 11, 21)),
+    ("comunicase y cumplase\n\ndado en bogota d.c., a los doce (12) dias del mes de diciembre de (2025).\nfrancisco pareja",
+     date(2025, 12, 12)),
+])
+def test_fechas_de_cierre_reales(cierre, esperada):
+    a = analizar_texto(["ACUERDO No. 49 de 2025 POR EL CUAL SE APRUEBAN LOS VALORES PARA EL AÑO 2026 " + "x " * 50, cierre])
+    assert a.fecha_expedicion == esperada
+    assert a.tiene_cierre
+
+
+def test_notificacion_firmada_y_acto_sin_por_el_cual():
+    fuac = ("NOTIFICACIÓN CONSEJO SUPERIOR ACTA No. 117 del 11 de noviembre de 2025 ASUNTO: APROBACIÓN DERECHOS PECUNIARIOS "
+            "VIGENCIA 2026 " + "Matrícula $ 4.500.000 " * 5 + " La presente notificación se expide para los fines pertinentes. "
+            "Cordialmente, HECTOR JULIAN GARCIA MENDOZA Secretario General")
+    assert analizar_texto([fuac]).tiene_cierre
+    fucs = ["DERECHOS PECUNIARIOS FUCS 2026"] + ["Medicina $ 29.576.000"] * 3 + [
+        "ACUERDO No. 6813\nPágina 1\nACUERDO No. 6813\nEl Consejo Superior de la Fundación Universitaria de Ciencias de la Salud, "
+        "en uso de sus atribuciones legales"]
+    assert analizar_texto(fucs).numero_acto == "6813"
+
+
+def test_fecha_de_sesion_en_encabezado():
+    fucs = ["DERECHOS PECUNIARIOS FUCS 2026"] + ["Medicina $ 29.576.000 $ 29.576.000"] * 3 + [
+        "ACUERDO No. 6813\nEl Consejo Superior de la Fundación Universitaria de Ciencias de la Salud, en uso de sus\n"
+        "atribuciones legales y de acuerdo con los estatutos ratificados mediante Resolución No. 594 de 24 de enero\n"
+        "de 2024 del Ministerio de Educación Nacional, en sesión ordinaria No. 665 del cinco (05) de agosto\nde 2025 y\n"
+        "CONSIDERANDO ... valores para el año 2026. NOTIFÍQUESE Y CÚMPLASE Dado en Bogotá D.C., a los cinco (05) días del"]
+    a = analizar_texto(fucs)
+    assert (a.numero_acto, a.fecha_expedicion, a.origen_fecha) == ("6813", date(2025, 8, 5), "sesion")
+    assert dictaminar(a, 2026)[0] == "FECHA_TEMPRANA"

@@ -107,10 +107,24 @@ _RE_DADO = re.compile(
 _RE_FECHA = re.compile(r"\b(\d{1,2})\s*(?:\(\d{1,2}\)\s*)?(?:de\s+)?(" + _M + r")\s+(?:(?:de|del)\s+)?(20\d{2})")
 _RE_FECHA_MES_DIA = re.compile(r"\(\s*(" + _M + r")\s+(\d{1,2})\s*(?:de\s+(20\d{2}))?\s*\)")
 _RE_FECHA_MDA = re.compile(r"\b(" + _M + r")\s+(\d{1,2})\s*(?:,|de|del)\s*(20\d{2})")
+_RE_SESION_FECHA = re.compile(
+    r"sesion(?:\s+(?:ordinaria|extraordinaria))?(?:\s+n\w*\.?\s*[\d-]+)?\s+del?\s+(?:[a-z]+\s+)?\(?(\d{1,2})\)?\s+de\s+(" + _M + r")\s+(?:de\s+|del\s+)?(20\d{2})"
+)
 _RE_PAGINA = re.compile(r"pagina\s*(\d{1,3})\s*(?:de|/)\s*(\d{1,3})")
-_RE_CIERRE = re.compile(r"(dad[oa] en|comuniquese|publiquese|cumplase|para constancia|firman?\b|secretari[oa] general|rector)")
+_RE_CIERRE = re.compile(r"(dad[oa] en|comuniquese|publiquese|cumplase|para constancia|como constancia|firman?\b|firmado digitalmente"
+                        r"|el presidente\W+el secretario|presidente\W+secretari[oa]|secretari[oa] general|rector)")
+# señales fuertes de cierre/firma, válidas en cualquier página (actos con anexos después de la firma)
+_RE_CIERRE_FUERTE = re.compile(r"(dad[oa] en|comuniquese|comunicase|cumplase|para constancia|como constancia|firmado digitalmente|cordialmente"
+                               r"|el presidente\W+el secretario)")
+# fecha de cierre con el año en letras: "...del mes de noviembre, de dos mil veinticinco (2025)"
+_RE_DADO_LETRAS = re.compile(
+    r"(?:dad[oa]|expedid[oa]|firmad[oa]|se expide)\b[^\n]{0,200}?(?:\(?(\d{1,2})\)?\s*)?dias?\W+del?\s+mes\s+de\s+(" + _M + r")"
+    r"\W+(?:de|del)\s+(?:ano\s+)?[a-z\s]{0,60}\(\s*(20\d{2})\s*\)",
+    re.S,
+)
 _RE_DINERO = re.compile(r"\$\s*\d{1,3}(?:['’]\d{3})?(?:[.,\s]\d{3})+|(?<![\d.,'’])\d{1,3}(?:['’]\d{3})?(?:[.,]\d{3})+(?![\d.,]*\d)")
-_RE_POR_CUAL = re.compile(r"por (?:el|la|medio de la|medio del|medio de el) cual|por medio de la presente|se (?:fija|establece|aprueba|determina)")
+_RE_POR_CUAL = re.compile(r"por (?:el|la|medio de la|medio del|medio de el) cual|por medio de la presente|se (?:fija|establece|aprueba|determina)"
+                          r"|en uso\s+de\s+sus\s+(?:atribuciones|facultades)|en\s+ejercicio\s+de\s+sus")
 _RE_NO_ES_ACTO = re.compile(r"(personeria|mediante|segun|conforme a|modificad[oa] por|derogad[oa]|reconocid[oa])[^\n]{0,20}$")
 _RE_INCREMENTO = re.compile(
     r"(?:increment|ajust|actualiz|aument)\w*[^%]{0,160}?\d{1,2}(?:[.,]\d{1,2})?\s*%"
@@ -236,15 +250,25 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
     ultima = "\n".join(planos[-2:])
 
     tipo, num, anio_acto, m = _identificar_acto(cabecera)
+    if not tipo:
+        # portada o tablas antes del acto (p. ej. FUCS): se busca un acto con título en todo el documento
+        t2, n2, a2, m2 = _identificar_acto(todo[:200000])
+        if t2 and (_RE_POR_CUAL.search(todo[m2.end(): m2.end() + 400])
+                   or re.search(r"en uso\s+de\s+sus\s+(?:atribuciones|facultades)|en\s+ejercicio\s+de\s+sus", todo[m2.end(): m2.end() + 400])):
+            tipo, num, anio_acto = t2, n2, a2
+            cabecera = todo[max(0, m2.start() - 200): m2.start() + 6000]
+            m = _RE_TIPO.search(cabecera)
 
     fecha, origen = None, None
-    dados = [_fecha(*x.groups()) for x in _RE_DADO.finditer(ultima)] or [_fecha(*x.groups()) for x in _RE_DADO.finditer(todo)]
+    dados = ([_fecha(*x.groups()) for x in _RE_DADO.finditer(ultima)] or [_fecha(*x.groups()) for x in _RE_DADO.finditer(todo)]
+             or [_fecha(x.group(1) or 1, x.group(2), x.group(3)) for x in _RE_DADO_LETRAS.finditer(todo)])
     dados = [d for d in dados if d]
     if dados:
         fecha, origen = dados[-1], "cierre"
     if not fecha and m:
         # fecha del encabezado tras el número de acto: "(noviembre 28)", "28 de noviembre de 2025"
         ventana = cabecera[m.start(): m.end() + 600]
+        ms = _RE_SESION_FECHA.search(ventana)
         md = _RE_FECHA_MES_DIA.search(ventana)
         fd = _RE_FECHA.search(ventana)
         fm = _RE_FECHA_MDA.search(ventana)
@@ -256,7 +280,11 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
         if fm:
             candidatos.append((fm.start(), _fecha(fm.group(2), fm.group(1), fm.group(3))))
         candidatos = [c for c in candidatos if c[1]]
-        if candidatos:
+        fs = _fecha(ms.group(1), ms.group(2), ms.group(3)) if ms else None
+        if fs:
+            # "en sesión ordinaria No. 665 del cinco (05) de agosto de 2025": fecha de aprobación del acto
+            fecha, origen = fs, "sesion"
+        elif candidatos:
             fecha, origen = min(candidatos)[1], "encabezado"
     if not fecha:
         fd = _RE_FECHA.search(cabecera)
@@ -302,7 +330,7 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
         vigencia=vigencia,
         vigencias_mencionadas=", ".join(f"{a}:{n}" for a, n in sorted(vig.items())),
         paginas_declaradas=paginas_decl,
-        tiene_cierre=bool(_RE_CIERRE.search(ultima)),
+        tiene_cierre=bool(_RE_CIERRE.search(ultima)) or bool(_RE_CIERRE_FUERTE.search(todo)),
         valores_dinero=len(_RE_DINERO.findall(todo)),
         es_reglamento=bool(_RE_REGLAMENTO.search(titulo)),
         fija_incremento=bool(_RE_INCREMENTO.search(todo)),
@@ -376,6 +404,18 @@ def cobertura_programas(texto: str, programas: list[str]) -> tuple[int, int]:
 
 # --------------------------------------------------------------- recorrido
 
+def _firmas_digitales(ruta: Path) -> int:
+    """Número de campos de firma digital en el PDF (0 si no se puede leer)."""
+    try:
+        import fitz
+
+        with fitz.open(ruta) as doc:
+            return sum(1 for pg in doc for w in (pg.widgets() or [])
+                       if w.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE)
+    except Exception:
+        return 0
+
+
 def validar_carpeta(
     documentos: Path,
     anio_objetivo: int,
@@ -416,6 +456,9 @@ def validar_carpeta(
                     filas.append(fila)
                     continue
                 a = analizar_texto(paginas, usados)
+                firmas = _firmas_digitales(f)
+                if firmas and not a.tiene_cierre:
+                    a.tiene_cierre = True
                 estado, obs = dictaminar(a, anio_objetivo)
                 if anio != anio_objetivo and a.vigencia == anio:
                     # acto del año de su carpeta (p. ej. precios 2025 en 2025/): correcto, no es del objetivo
@@ -434,6 +477,7 @@ def validar_carpeta(
                     "PAGINAS": a.paginas,
                     "PAGINAS_DECLARADAS": a.paginas_declaradas,
                     "PAGINAS_OCR": a.paginas_ocr,
+                    "FIRMAS_DIGITALES": firmas,
                     "TIENE_CIERRE": a.tiene_cierre,
                     "VALORES_DINERO": a.valores_dinero,
                     "PROGRAMAS_ENCONTRADOS": vistos,
@@ -461,7 +505,10 @@ def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:
         # Acto que fija % o pocos valores + tabla publicada del mismo año = fuente completa
         actos_pct = validos[validos["ESTADO_DOC"].isin(["SOLO_INCREMENTO", "POCOS_VALORES"])]
         n_val = pd.to_numeric(del_anio.get("VALORES_DINERO"), errors="coerce").fillna(0)
-        hay_tabla = bool(((n_val >= 3) & (del_anio["ESTADO_DOC"] != "SIN_PRECIOS")).any()) or bool((g["ESTADO_DOC"] == "NO_PDF").any())
+        hay_tabla = (bool(((n_val >= 3) & (del_anio["ESTADO_DOC"] != "SIN_PRECIOS")).any())
+                     or bool((g["ESTADO_DOC"] == "NO_PDF").any())
+                     # el propio acto trae valores (p. ej. valor único de matrícula para todos los programas)
+                     or bool((pd.to_numeric(actos_pct.get("VALORES_DINERO"), errors="coerce").fillna(0) >= 1).any()))
         tipo_fuente = ""
         if len(limpios):
             estado, tipo_fuente = "COMPLETO", "acto"
