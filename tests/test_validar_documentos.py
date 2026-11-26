@@ -124,6 +124,15 @@ from dpcol.validar_documentos import _identificar_acto, _plano
      "POR LA CUAL SE FIJAN LOS VALORES. Que el Consejo Superior en su sesión Acta No. 327 autorizó", "RESOLUCION", "750", 2024),
     ("RESOLUCIÓN RECTORAL Nro. 130 Medellín, noviembre 27 de 2025", "RESOLUCION", "130", None),
     ("ACUERDO DE SALA GENERAL No. 65 DE 2025 (noviembre 28)", "ACUERDO", "65", 2025),
+    ("Pontificia Universidad JAVERIANA ACUERDO N”. 781 Valores de Matrícula y Otros Derechos Pecuniarios", "ACUERDO", "781", None),
+    ("R.R.G. No. 086/2025 RESOLUCIÓN RECTORAL GENERAL NO. 086 DEL 14 DE NOVIEMBRE DE 2025 “Por medio de la cual se establecen",
+     "RESOLUCION", "086", 2025),
+    ("Resolución N.º 43 de 2025 (7 de noviembre) “Por la cual se fijan los derechos pecuniarios", "RESOLUCION", "43", 2025),
+    ("Bogotá, D.C., 3 de septiembre de 2025 RECTORÍA Resolución N.* 013 de 2025 Derechos de Matrícula 2026", "RESOLUCION", "013", 2025),
+    ("RECTCRÍA ACUERDO NUM. O31 [27 de noviembre de 2O25) Por el cual se establecen los derechos", "ACUERDO", "031", 2025),
+    ("ORDEN EJECUTIVA Del 27 de noviembre de 2025 Por medio de la cual se fijan los derechos de matrícula", "ORDEN", "s/n", 2025),
+    ("Derechos pecuniarios Universidad de los Andes 2026 El Comité Directivo, en su sesión No. 312-25 del 10 de diciembre "
+     "de 2025, aprobó el incremento", "SESION", "312-25", 2025),
     ("Personería Jurídica: RES. 2085 de 1987 del MEN RES. 1904 del MEN, 5 de Agosto de 2002 ACUERDO DEL CONSEJO DE "
      "FUNDADORES 002 (25 de noviembre de 2025) POR EL CUAL SE DETERMINAN LOS VALORES", "ACUERDO", "002", 2025),
     ("ACREDITACIÓN INSTITUCIONAL UNIVERSIDAD SIMÓN BOLÍVAR ALTA CALIDAD Resolución 015 MINEDUCACIÓN BARRANQUILLA "

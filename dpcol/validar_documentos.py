@@ -33,9 +33,14 @@ MESES = {
 _M = "|".join(MESES)
 
 
+_RE_O_EN_NUMERO = re.compile(r"(?<=\d)[oO](?=\d)|(?<=[\s\[(.])[oO](?=\d{1,4}\b)|(?<=\d)[oO](?=\d|\b)")
+
+
 def _plano(t: str) -> str:
     t = unicodedata.normalize("NFKD", t)
     t = "".join(c for c in t if not unicodedata.combining(c))
+    # OCR: "O31", "2O25" -> "031", "2025"
+    t = _RE_O_EN_NUMERO.sub("0", t)
     return t.lower()
 
 
@@ -86,12 +91,12 @@ def extraer_con_cache(ruta: Path, cache: Path | None, sha: str | None, **kw) -> 
 
 # ------------------------------------------------------------------ análisis
 
-_TIPOS_ACTO = r"(acuerdo|resolucion(?: rectoral| de rectoria| de consiliatura)?|acto constitutivo|orden ejecutiva|decreto|circular|acta)"
+_TIPOS_ACTO = r"(acuerdo|resolucion(?: rectoral(?: general)?| de rectoria| de consiliatura)?|acto constitutivo|orden ejecutiva|decreto|circular|acta|sesion)"
 _RE_TIPO = re.compile(r"\b" + _TIPOS_ACTO + r"\b")
 # identificador tras el tipo: "no. 65", "nro. 130", "no.19", "dp-033-2025", "cd-037-2025", "r – 2025 – 032", "s.1.1- 1954", "114"
 _RE_ID = re.compile(
     r"^[\s:]*(?:(?:de|del)?\s*(?:la\s+)?(?:sala general|consejo(?:\s+(?!no\b|nro\b|numero\b)[a-z]+){0,5}|rectoria|consiliatura|junta directiva)\s*)?"
-    r"(?:n(?:o|ro|um|umero)?\s*[.°º:]?\s*)?"
+    r"(?:n(?:o|ro|um|umero)?\s*[.°º:”\x22'*]*\s*(?:o\b\.?\s*)?)?"
     r"((?:[a-z]{1,4}[\s.]*(?:\d[.\d]*)?\s*[-–]\s*)?\d[\d]*(?:\s*[-–]\s*\d+)*)"
 )
 _RE_DADO = re.compile(
@@ -188,6 +193,12 @@ def _identificar_acto(cabecera: str):
         resto = cabecera[mt.end(): mt.end() + 120]
         mi = _RE_ID.match(resto)
         if not mi:
+            fs = re.match(r"\s*(?:del?\s+)?(\d{1,2})\s+de\s+(" + _M + r")\s+(?:de\s+|del\s+)?(20[1-3]\d)", resto)
+            if fs and mt.group(1) in ("orden ejecutiva", "acuerdo", "resolucion", "acta"):
+                titulo = bool(_RE_POR_CUAL.search(cabecera[mt.end(): mt.end() + 400]))
+                candidatos.append((not titulo, mt.start(), (mt.group(1).split()[0].upper(), "s/n", int(fs.group(3)), mt)))
+                if titulo:
+                    break
             continue
         ident = re.sub(r"\s+", "", mi.group(1)).strip("-–")
         if not ident or ident.isdigit() and len(ident) > 5:
@@ -198,7 +209,7 @@ def _identificar_acto(cabecera: str):
         if en_id:
             anio = int(en_id[0])
         else:
-            ma = re.match(r"\s*(?:\(|de|del|-)?\s*(?:(?:\d{1,2}\s+de\s+)?(?:" + _M + r")(?:\s+\d{1,2})?\s*(?:de|del|,)?\s*)?(20[1-3]\d)", cola)
+            ma = re.match(r"\s*(?:[(\[]|de|del|-)?\s*(?:(?:\d{1,2}\s+de\s+)?(?:" + _M + r")(?:\s+\d{1,2})?\s*(?:de|del|,)?\s*)?(20[1-3]\d)", cola)
             if ma:
                 anio = int(ma.group(1))
         # "por el/la cual" debe aparecer antes de la siguiente mención de acto
