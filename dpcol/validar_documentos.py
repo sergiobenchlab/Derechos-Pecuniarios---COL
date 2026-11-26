@@ -86,22 +86,28 @@ def extraer_con_cache(ruta: Path, cache: Path | None, sha: str | None, **kw) -> 
 
 # ------------------------------------------------------------------ análisis
 
-_RE_ACTO = re.compile(
-    r"(acuerdo|resolucion|acta)\b[^\n]{0,60}?\bn(?:o|um|umero|°|º)?\s*[.:°º]?\s*(\d{1,5}[a-z]?)"
-    r"(?:\s*[-/]\s*\d{1,4})?\s*(?:de|del|-|/)\s*(?:\d{1,2}\s+de\s+(?:" + _M + r")\s+de\s+)?(20\d{2})",
+_TIPOS_ACTO = r"(acuerdo|resolucion(?: rectoral| de rectoria| de consiliatura)?|acto constitutivo|orden ejecutiva|decreto|circular|acta)"
+_RE_TIPO = re.compile(r"\b" + _TIPOS_ACTO + r"\b")
+# identificador tras el tipo: "no. 65", "nro. 130", "no.19", "dp-033-2025", "cd-037-2025", "r – 2025 – 032", "s.1.1- 1954", "114"
+_RE_ID = re.compile(
+    r"^[\s:]*(?:(?:de\s+)?(?:la\s+)?(?:sala general|consejo(?: superior| directivo| academico| administrativo y financiero general)?|rectoria|consiliatura|junta directiva)\s*)?"
+    r"(?:n(?:o|ro|um|umero)?\s*[.°º:]?\s*)?"
+    r"((?:[a-z]{1,4}[\s.]*(?:\d[.\d]*)?\s*[-–]\s*)?\d[\d]*(?:\s*[-–]\s*\d+)*)"
 )
-_RE_ACTO_SIMPLE = re.compile(r"(acuerdo|resolucion|acta)[^\n]{0,40}?\b(\d{1,5})\s+(?:de|del)\s+(20\d{2})")
 _RE_DADO = re.compile(
     r"(?:dad[oa]|expedid[oa]|aprobad[oa]|firmad[oa])\b[^\n]{0,120}?"
-    r"(?:\(?(\d{1,2})\)?\s*(?:dias?\s+del?\s+mes\s+de\s+|de\s+)?)(" + _M + r")\s+(?:de|del)\s+(?:ano\s+)?(20\d{2})",
+    r"(?:\(?(\d{1,2})\)?\s*(?:dias?\s+del?\s+mes\s+de\s+|de\s+)?)(" + _M + r")\s+(?:(?:de|del)\s+)?(?:ano\s+)?(20\d{2})",
     re.S,
 )
-_RE_FECHA = re.compile(r"\b(\d{1,2})\s*(?:\(\d{1,2}\)\s*)?(?:de\s+)?(" + _M + r")\s+(?:de|del)\s+(20\d{2})")
+_RE_FECHA = re.compile(r"\b(\d{1,2})\s*(?:\(\d{1,2}\)\s*)?(?:de\s+)?(" + _M + r")\s+(?:(?:de|del)\s+)?(20\d{2})")
 _RE_FECHA_MES_DIA = re.compile(r"\(\s*(" + _M + r")\s+(\d{1,2})\s*(?:de\s+(20\d{2}))?\s*\)")
 _RE_FECHA_MDA = re.compile(r"\b(" + _M + r")\s+(\d{1,2})\s*(?:,|de|del)\s*(20\d{2})")
 _RE_PAGINA = re.compile(r"pagina\s*(\d{1,3})\s*(?:de|/)\s*(\d{1,3})")
 _RE_CIERRE = re.compile(r"(dad[oa] en|comuniquese|publiquese|cumplase|para constancia|firman?\b|secretari[oa] general|rector)")
-_RE_DINERO = re.compile(r"\$\s*\d{1,3}(?:[.,\s]\d{3})+|\b\d{1,3}(?:[.,]\d{3}){2,}\b")
+_RE_DINERO = re.compile(r"\$\s*\d{1,3}(?:['’]\d{3})?(?:[.,\s]\d{3})+|(?<![\d.,'’])\d{1,3}(?:['’]\d{3})?(?:[.,]\d{3})+(?![\d.,]*\d)")
+_RE_POR_CUAL = re.compile(r"por (?:el|la|medio de la|medio del|medio de el) cual|por medio de la presente|se (?:fija|establece|aprueba|determina)")
+_RE_NO_ES_ACTO = re.compile(r"(personeria|mediante|segun|conforme a|modificad[oa] por|derogad[oa]|reconocid[oa])[^\n]{0,40}$")
+_RE_INCREMENTO = re.compile(r"increment\w*[^%]{0,120}?\d{1,2}(?:[.,]\d{1,2})?\s*%|\(\s*\d{1,2}(?:[.,]\d{1,2})?\s*%\s*\)")
 _RE_REGLAMENTO = re.compile(r"\breglamento\b")
 
 
@@ -114,6 +120,7 @@ def _vigencias(t: str) -> Counter:
         r"(?:periodo|semestre)s?\s*(?:academicos?\s*)?(?:del?\s*)?(20\d{2})\s*[-–]\s*[12i]\b",
         r"\b(20\d{2})\s*[-–]\s*(?:0?[12]|i{1,2})\b",
         r"a partir del?[^\n]{0,60}?(20\d{2})",
+        r"(?:tarifas|valores|precios|derechos pecuniarios|matriculas?)\s+(?:de\s+|del\s+|para\s+)?(?:ano\s+)?(20\d{2})",
     ]
     for p in pats:
         for m in re.finditer(p, t):
@@ -137,6 +144,7 @@ class Analisis:
     tiene_cierre: bool
     valores_dinero: int
     es_reglamento: bool
+    fija_incremento: bool = False
 
 
 def _fecha(d, mes, a) -> date | None:
@@ -146,17 +154,53 @@ def _fecha(d, mes, a) -> date | None:
         return None
 
 
+def _identificar_acto(cabecera: str):
+    """Devuelve (tipo, número, año, match).
+
+    Entre las menciones de tipo de acto del encabezado prefiere la que va
+    seguida de "por el/la cual…" (el título del acto) y descarta las que son
+    referencias (p. ej. "Personería jurídica: Resolución 9168 de 1987",
+    "mediante Acuerdo No. 57 de 2018"). El año sale del identificador o de lo
+    que sigue ("de 2025", "(1 de diciembre de 2025)").
+    """
+    candidatos = []
+    for mt in _RE_TIPO.finditer(cabecera):
+        antes = cabecera[max(0, mt.start() - 60): mt.start()]
+        if _RE_NO_ES_ACTO.search(antes):
+            continue
+        resto = cabecera[mt.end(): mt.end() + 120]
+        mi = _RE_ID.match(resto)
+        if not mi:
+            continue
+        ident = re.sub(r"\s+", "", mi.group(1)).strip("-–")
+        if not ident or ident.isdigit() and len(ident) > 5:
+            continue
+        cola = resto[mi.end(): mi.end() + 80]
+        anio = None
+        en_id = re.findall(r"20[1-3]\d", ident)
+        if en_id:
+            anio = int(en_id[0])
+        else:
+            ma = re.match(r"\s*(?:\(|de|del|-)?\s*(?:(?:\d{1,2}\s+de\s+)?(?:" + _M + r")(?:\s+\d{1,2})?\s*(?:de|del|,)?\s*)?(20[1-3]\d)", cola)
+            if ma:
+                anio = int(ma.group(1))
+        titulo = bool(_RE_POR_CUAL.search(cabecera[mt.end(): mt.end() + 400]))
+        tipo = mt.group(1).split()[0].upper()
+        candidatos.append((not titulo, mt.start(), (tipo, ident, anio, mt)))
+        if titulo:
+            break
+    if not candidatos:
+        return None, None, None, None
+    return min(candidatos, key=lambda c: (c[0], c[1]))[2]
+
+
 def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> Analisis:
     planos = [_plano(p) for p in paginas]
     todo = "\n".join(planos)
     cabecera = "\n".join(planos[:2])[:6000]
     ultima = "\n".join(planos[-2:])
 
-    tipo = num = None
-    anio_acto = None
-    m = _RE_ACTO.search(cabecera) or _RE_ACTO_SIMPLE.search(cabecera) or _RE_ACTO.search(todo)
-    if m:
-        tipo, num, anio_acto = m.group(1).upper(), m.group(2), int(m.group(3))
+    tipo, num, anio_acto, m = _identificar_acto(cabecera)
 
     fecha, origen = None, None
     dados = [_fecha(*x.groups()) for x in _RE_DADO.finditer(ultima)] or [_fecha(*x.groups()) for x in _RE_DADO.finditer(todo)]
@@ -187,12 +231,23 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
         if cand:
             fecha, origen = min(cand)[1], "primera_fecha"
 
+    if tipo and not anio_acto and fecha:
+        anio_acto = fecha.year
+
     vig = _vigencias(todo)
     vigencia = None
-    if vig:
-        base = anio_acto or (fecha.year if fecha else None)
+    base = anio_acto or (fecha.year if fecha else None)
+    vig_titulo = {a: n for a, n in _vigencias(cabecera[:1500]).items() if base is None or a >= base}
+    if vig_titulo:
+        # lo que dice el título del acto ("...para el año 2026") manda
+        vigencia = max(vig_titulo, key=lambda a: (vig_titulo[a], a))
+    elif vig:
         candidatos = {a: n for a, n in vig.items() if base is None or a >= base}
-        if candidatos:
+        if fecha and fecha.month >= 9 and candidatos.get(fecha.year + 1):
+            # acto de fin de año que menciona el año siguiente: las tablas suelen
+            # repetir los valores del año en curso como comparación
+            vigencia = fecha.year + 1
+        elif candidatos:
             vigencia = max(candidatos, key=lambda a: (candidatos[a], a))
 
     decl = [int(b) for a, b in _RE_PAGINA.findall(todo) if 0 < int(a) <= int(b) < 500]
@@ -214,6 +269,7 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
         tiene_cierre=bool(_RE_CIERRE.search(ultima)),
         valores_dinero=len(_RE_DINERO.findall(todo)),
         es_reglamento=bool(_RE_REGLAMENTO.search(titulo)),
+        fija_incremento=bool(_RE_INCREMENTO.search(todo)),
     )
 
 
@@ -222,18 +278,22 @@ def analizar_texto(paginas: list[str], usados_ocr: list[bool] | None = None) -> 
 ORDEN_GRAVEDAD = [
     "NO_LEGIBLE", "SIN_PRECIOS", "VIGENCIA_DISTINTA", "INCOMPLETO_PAGINAS",
     "FECHA_FUERA_DE_RANGO", "SIN_ACTO_IDENTIFICADO", "SIN_FECHA", "SIN_CIERRE",
-    "FECHA_TARDIA", "FECHA_TEMPRANA", "VIGENCIA_NO_EXPLICITA", "OK",
+    "SOLO_INCREMENTO", "FECHA_TARDIA", "FECHA_TEMPRANA", "VIGENCIA_NO_EXPLICITA", "OK",
 ]
 
 
-def dictaminar(a: Analisis, anio_objetivo: int, min_valores: int = 8) -> tuple[str, list[str]]:
+def dictaminar(a: Analisis, anio_objetivo: int, min_valores: int = 3) -> tuple[str, list[str]]:
     obs: list[str] = []
     if a.caracteres < 200:
         return "NO_LEGIBLE", ["sin texto útil ni con OCR"]
     if a.valores_dinero < min_valores:
-        obs.append("SIN_PRECIOS")
-        if a.es_reglamento:
-            obs.append("es un reglamento, no un acto que fija valores")
+        if a.fija_incremento and not a.es_reglamento:
+            obs.append("SOLO_INCREMENTO")
+            obs.append("fija un % de incremento sin tabla de valores: requiere los valores del año anterior")
+        else:
+            obs.append("SIN_PRECIOS")
+            if a.es_reglamento:
+                obs.append("es un reglamento, no un acto que fija valores")
     if a.vigencia is None:
         obs.append("VIGENCIA_NO_EXPLICITA")
     elif a.vigencia != anio_objetivo:
@@ -347,7 +407,7 @@ def validar_carpeta(
     return docs, resumen_institucion(docs, anio_objetivo)
 
 
-_VALIDOS = {"OK", "FECHA_TEMPRANA", "FECHA_TARDIA", "VIGENCIA_NO_EXPLICITA", "SIN_CIERRE", "SIN_FECHA", "SIN_ACTO_IDENTIFICADO"}
+_VALIDOS = {"OK", "SOLO_INCREMENTO", "FECHA_TEMPRANA", "FECHA_TARDIA", "VIGENCIA_NO_EXPLICITA", "SIN_CIERRE", "SIN_FECHA", "SIN_ACTO_IDENTIFICADO"}
 
 
 def resumen_institucion(docs: pd.DataFrame, anio_objetivo: int) -> pd.DataFrame:

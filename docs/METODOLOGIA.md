@@ -72,3 +72,36 @@ histórica ≈ 5,5 %) y `PRC_CON_DECIMALES` marca precios con centavos.
 - **1.653 filas de 2026 (65 IES) tienen precios con decimales** y variación mediana de exactamente 5,5 %
   sobre 2025: muy probablemente son proyecciones, no precios publicados.
 - `on_bad_lines='skip'` en los notebooks descartaba filas sin aviso; aquí está prohibido.
+
+## Validación de documentos fuente (`dpcol validar-documentos`)
+
+Para los precios del año N se espera un **acto administrativo** (acuerdo, resolución,
+acta, circular, orden ejecutiva…) **expedido en noviembre o diciembre de N‑1**, que diga
+que fija valores **para N**, con su tabla de valores, todas sus páginas y su cierre/firma.
+Se revisan las carpetas `N-1/` y `N/` de cada institución, porque un acto expedido en
+2025 para 2026 puede haber quedado en `2025/` por el año de su nombre.
+
+Por documento se extrae el texto (OCR con Tesseract en páginas escaneadas, guardado en
+caché) y se determina:
+
+| Campo | Cómo |
+|---|---|
+| Acto | Tipo + identificador en el encabezado; se prefiere el que va seguido de "por el/la cual…" y se ignoran referencias ("Personería jurídica: Resolución…", "mediante Acuerdo…") |
+| Fecha de expedición | "Dado en … a los 28 días del mes de noviembre de 2025"; si no, la fecha del encabezado |
+| Vigencia | La del título ("…para el año 2026"); si no, en actos de sep‑dic se toma el año siguiente cuando se menciona |
+| Completo | "Página X de N" vs. páginas del archivo, y cierre en la última página |
+| Precios | Montos con separador de miles (con o sin `$`, también `1'200.000`) |
+| Cobertura | % de programas activos de la institución cuyo nombre aparece en el texto |
+
+Estados por documento: `OK`, `OTRO_ANIO_OK` (acto del año de su carpeta, p. ej. precios 2025
+en `2025/`), `SOLO_INCREMENTO` (fija un % sin tabla), `FECHA_TEMPRANA` (ene‑oct de N‑1),
+`FECHA_TARDIA` (ene‑mar de N), `SIN_CIERRE`, `SIN_FECHA`, `SIN_ACTO_IDENTIFICADO`
+(tabla de tarifas sin acto), `FECHA_FUERA_DE_RANGO`, `INCOMPLETO_PAGINAS`,
+`VIGENCIA_DISTINTA`, `SIN_PRECIOS` (p. ej. un reglamento), `NO_LEGIBLE`, `NO_PDF`.
+
+Por institución: `COMPLETO` (al menos un acto `OK` para N), `REVISAR` (hay acto para N con
+observaciones), `SOLO_TABULAR` (solo XLSX/CSV), `FALTA_ACTO`.
+
+Caso de referencia — Universidad Simón Bolívar 2026: `PRECIOS 2026.pdf` (escaneado) es el
+Acuerdo de Sala General No. 65 de 2025 (28‑nov‑2025), "para el año 2026", 9 de 9 páginas,
+con cierre → `OK`. `SIMON_BOLIVAR_2026.pdf` es el Reglamento (Acuerdo 58 de 2019) → `SIN_PRECIOS`.

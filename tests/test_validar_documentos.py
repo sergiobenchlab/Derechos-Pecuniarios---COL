@@ -101,3 +101,73 @@ def test_resolucion_rectoral():
 def test_cobertura_programas():
     v, n = cobertura_programas(USB_P1 + "\n" + USB_MEDIO, ["ADMINISTRACION DE EMPRESAS", "MEDICINA", "DERECHO", "ESPECIALIZACION EN PSICOLOGIA"])
     assert (v, n) == (3, 4)
+
+
+# Encabezados reales (texto/OCR) de actos 2026 de otras IES
+import pytest
+
+from dpcol.validar_documentos import _identificar_acto, _plano
+
+
+@pytest.mark.parametrize("texto,tipo,num,anio", [
+    ("CONSEJO SUPERIOR UNIVERSITARIO Acto Constitutivo No. 397 del 01 de diciembre de 2025 “Por medio del cual se fijan",
+     "ACTO", "397", 2025),
+    ("ACUERDO No.19 (1 de diciembre de 2025) EL CONSEJO ADMINISTRATIVO Y FINANCIERO GENERAL", "ACUERDO", "19", 2025),
+    ("Externado RESOLUCIÓN RECTORAL DP-033-2025 Por la cual se aprueba el incremento", "RESOLUCION", "dp-033-2025", 2025),
+    ("UTADEO ACUERDO No. 014 Noviembre 14 de 2025 Por el cual se aprueba el valor", "ACUERDO", "014", 2025),
+    ("RESOLUCIÓN DE RECTORÍA No. R – 2025 – 032 21 de noviembre de 2025", "RESOLUCION", "r–2025–032", 2025),
+    ("RESOLUCIÓN DE RECTORÍA 114 DEL 21 DE NOVIEMBRE DE 2025 POR LA CUAL SE FIJA", "RESOLUCION", "114", 2025),
+    ("Resolución No. 023 2 de diciembre de 2025 Por medio de la cual modifica", "RESOLUCION", "023", 2025),
+    ("Derechos Pecuniarios ACUERDO CD-037-2025 Estos valores entran en vigencia", "ACUERDO", "cd-037-2025", 2025),
+    ("CONSEJO SUPERIOR Acuerdo No. 047 de 2025 (5 de diciembre) Por el cual", "ACUERDO", "047", 2025),
+    ("RESOLUCIÓN RECTORAL Nro. 130 Medellín, noviembre 27 de 2025", "RESOLUCION", "130", None),
+    ("ACUERDO DE SALA GENERAL No. 65 DE 2025 (noviembre 28)", "ACUERDO", "65", 2025),
+    ("Vigilada MEN. Personería jurídica: Resolución 9168 del 6 de agosto de 1987. CONSEJO SUPERIOR TecMD "
+     "ACUERDO No 058 (27 de noviembre 2025) POR MEDIO DE LA CUAL SE DETERMINAN LOS DERECHOS", "ACUERDO", "058", 2025),
+    ("RESOLUCIÓN CONSEJO DIRECTIVO No 20-2025 Por la cual se establece el valor de la Matricula", "RESOLUCION", "20-2025", 2025),
+    ("REGLAMENTO ACUERDO No. 58 DE 2019 deroga lo publicado mediante Acuerdo No. 57 de 2018. "
+     "ACUERDO DE SALA GENERAL No. 58 de 2019 (Noviembre 15) POR EL CUAL SE ACTUALIZA", "ACUERDO", "58", 2019),
+])
+def test_identificar_acto(texto, tipo, num, anio):
+    t, n, a, _ = _identificar_acto(_plano(texto))
+    assert (t, n, a) == (tipo, num, anio)
+
+
+def test_orden_ejecutiva_sin_numero_toma_anio_de_fecha():
+    t = ("ORDEN EJECUTIVA Del 27 de noviembre de 2025 Por medio de la cual se fijan los derechos de matrícula "
+         "para la vigencia del año 2026. Programa 4.500.000 Programa 5.200.000 Programa 6.100.000 "
+         "Dado en Bogotá a los 27 días del mes de noviembre de 2025. Comuníquese")
+    a = analizar_texto([t * 3])
+    assert a.fecha_expedicion == date(2025, 11, 27)
+    assert a.vigencia == 2026
+
+
+def test_montos_sin_signo_y_solo_incremento():
+    ucc = ("RESOLUCIÓN RECTORAL Nro. 139 Medellín, 27 de noviembre de 2025 VIGENCIA 2026 se incrementa en el IPC a "
+           "octubre 31 de 2025 en 5.51%. 599.068 599.068 641.859 " + "texto " * 60 + " Comuníquese y cúmplase")
+    a = analizar_texto([ucc])
+    assert a.valores_dinero == 3
+    assert dictaminar(a, 2026)[0] != "SIN_PRECIOS"
+    solo = ("ACUERDO 325 (19 de noviembre de 2025) para el año 2026. ARTÍCULO TERCERO. Incrementar en 5.51% los "
+            "valores de las matrículas. Matrícula $21.855.000 " + "texto " * 60 + " Comuníquese y cúmplase")
+    estado, obs = dictaminar(analizar_texto([solo]), 2026)
+    assert estado == "SOLO_INCREMENTO", obs
+
+
+def test_vigencia_por_asunto_y_montos_con_apostrofo():
+    t = ("CIRCULAR No. 306 12 de noviembre de 2025 ASUNTO: TARIFAS 2026 NIVEL DE FORMACIÓN POSGRADOS "
+         "Especialización $8'450.000 Maestría $12'300.000 Doctorado $15'100.000 " + "x " * 120 + " Rector")
+    a = analizar_texto([t])
+    assert a.vigencia == 2026
+    assert a.valores_dinero == 3
+    assert a.fecha_expedicion == date(2025, 11, 12)
+
+
+def test_vigencia_no_se_confunde_con_columna_del_anio_anterior():
+    # Acto de nov-2025 cuyas tablas muestran "valor 2025" más veces que "2026"
+    cuerpo = " ".join(["Programa valor año 2025 $4.500.000 incremento valor año 2026 $4.750.000"] * 3
+                      + ["vigencia 2025 comparativo"] * 4)
+    t = ("ACUERDO No. 010 de 2025 (28 de noviembre de 2025) Por el cual se fijan los derechos pecuniarios. "
+         + "x " * 800 + cuerpo + " Dado en Medellín a los 28 días del mes de noviembre de 2025. Comuníquese")
+    a = analizar_texto([t])
+    assert a.vigencia == 2026
