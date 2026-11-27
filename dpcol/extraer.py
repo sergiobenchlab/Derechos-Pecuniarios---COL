@@ -43,10 +43,26 @@ def clave_nombre(t) -> str:
     return " ".join(w for w in plano(t).split() if w not in _STOP)
 
 
-def montos(texto) -> list[float]:
+def montos(texto, escala: int = 1) -> list[float]:
     # el apóstrofo de millones ("8'450.000") se quita antes de interpretar separadores
     vals = [parsear_numero(re.sub(r"['’]", ".", m.group(0))) for m in _RE_MONTO.finditer(str(texto or ""))]
+    if escala != 1:
+        vals = [v * escala if v == v and 1_000 <= v < 1_000_000 else v for v in vals]
     return [v for v in vals if v == v and 50_000 <= v <= 400_000_000]
+
+
+_RE_MILES = re.compile(r"miles de pesos|valores? en miles|cifras en miles|\(en miles\)|\$\s*miles")
+
+
+def escala_documento(paginas: list[str]) -> int:
+    """1000 si el documento expresa valores en miles de pesos (p. ej. La Salle, Externado)."""
+    t = plano(" ".join(paginas[:3]))
+    if _RE_MILES.search(t):
+        return 1000
+    # sin aviso explícito: casi todos los montos con un solo grupo de miles y ninguno en millones
+    cortos = len(re.findall(r"(?<![\d.,])\d{1,2}[.,]\d{3}(?![\d.,]*\d)", " ".join(paginas)))
+    largos = len(re.findall(r"\d{1,3}(?:[.,]\d{3}){2,}", " ".join(paginas)))
+    return 1000 if cortos >= 30 and largos <= cortos * 0.05 else 1
 
 
 @dataclass
@@ -123,6 +139,52 @@ def _columnas_validas(encabezados: list[str]) -> list[int]:
     return con_2026 or validas
 
 
+def _procesar_tabla(tabla: list[list], npag: int, cruz: Cruzador, metodo: str) -> list[dict]:
+    """Filas de una tabla (PDF o XLSX) -> precios cruzados con programas."""
+    filas = []
+    if not tabla:
+        return filas
+    ncol = max(len(r) for r in tabla)
+    if ncol < 2:
+        return filas
+    enc = [""] * ncol
+    cuerpo = []
+    for r in tabla:
+        r = [(str(c) if c is not None else "").replace("\n", " ").strip() for c in r] + [""] * (ncol - len(r))
+        if not any(montos(c) for c in r):
+            enc = [(enc[i] + " " + r[i]).strip()[-200:] for i in range(ncol)]
+        else:
+            cuerpo.append(r)
+    # encabezados combinados: la celda vacía hereda el texto de la izquierda
+    enc_ext = list(enc)
+    for i in range(1, ncol):
+        if not enc_ext[i] and enc_ext[i - 1]:
+            enc_ext[i] = enc_ext[i - 1]
+    validas = _columnas_validas(enc_ext)
+    for r in cuerpo:
+        if _EXCLUIR_LINEA.search(plano(" ".join(r[:2]))):
+            continue
+        cols_monto = [i for i, c in enumerate(r) if montos(c)]
+        if not cols_monto:
+            continue
+        buenas = [i for i in cols_monto if i in validas] or cols_monto[:1]
+        valor = montos(r[buenas[0]])[0]
+        prog = cruz.por_codigo(r)
+        if prog:
+            cands, tipo = [prog], "codigo_snies"
+        else:
+            texto = " ".join(c for i, c in enumerate(r) if i not in cols_monto and not montos(c))
+            nombre = max((c for i, c in enumerate(r) if i < cols_monto[0]), key=len, default="")
+            cands, tipo = cruz.por_nombre(nombre, contexto=texto)
+        if not cands:
+            continue
+        for p in cands:
+            filas.append({"ID_PRGRM": p.id_prgrm, "PRC": valor, "PRD_PRC": _unidad(enc_ext[buenas[0]]),
+                          "PAGINA": npag, "METODO": metodo, "CRUCE": tipo,
+                          "ENCABEZADO": enc_ext[buenas[0]][:80], "TEXTO_FILA": " | ".join(r)[:300]})
+    return filas
+
+
 def extraer_tablas(pdf_path: Path, cruz: Cruzador) -> list[dict]:
     import pdfplumber
 
@@ -130,43 +192,25 @@ def extraer_tablas(pdf_path: Path, cruz: Cruzador) -> list[dict]:
     with pdfplumber.open(pdf_path) as pdf:
         for npag, pg in enumerate(pdf.pages, start=1):
             for tabla in pg.extract_tables() or []:
-                if not tabla or len(tabla[0]) < 2:
-                    continue
-                ncol = max(len(r) for r in tabla)
-                enc = [""] * ncol
-                cuerpo = []
-                for r in tabla:
-                    r = [(c or "").replace("\n", " ").strip() for c in r] + [""] * (ncol - len(r))
-                    if not any(montos(c) for c in r):
-                        enc = [(enc[i] + " " + r[i]).strip() for i in range(ncol)]
-                    else:
-                        cuerpo.append(r)
-                # encabezados combinados: la celda vacía hereda el texto de la izquierda
-                enc_ext = list(enc)
-                for i in range(1, ncol):
-                    if not enc_ext[i] and enc_ext[i - 1]:
-                        enc_ext[i] = enc_ext[i - 1]
-                for r in cuerpo:
-                    if _EXCLUIR_LINEA.search(plano(" ".join(r[:2]))):
-                        continue
-                    cols_monto = [i for i, c in enumerate(r) if montos(c)]
-                    if not cols_monto:
-                        continue
-                    buenas = [i for i in cols_monto if i in _columnas_validas(enc_ext)] or cols_monto[:1]
-                    valor = montos(r[buenas[0]])[0]
-                    prog = cruz.por_codigo(r)
-                    if prog:
-                        cands, tipo = [prog], "codigo_snies"
-                    else:
-                        texto = " ".join(c for i, c in enumerate(r) if i not in cols_monto and not montos(c))
-                        nombre = max((c for i, c in enumerate(r) if i < cols_monto[0]), key=len, default="")
-                        cands, tipo = cruz.por_nombre(nombre, contexto=texto)
-                    if not cands:
-                        continue
-                    for p in cands:
-                        filas.append({"ID_PRGRM": p.id_prgrm, "PRC": valor, "PRD_PRC": _unidad(enc_ext[buenas[0]]),
-                                      "PAGINA": npag, "METODO": "tabla", "CRUCE": tipo,
-                                      "ENCABEZADO": enc_ext[buenas[0]][:80], "TEXTO_FILA": " | ".join(r)[:300]})
+                filas += _procesar_tabla(tabla, npag, cruz, "tabla")
+    return filas
+
+
+def _celda_xlsx(v) -> str:
+    """Números de Excel >= 50.000 se presentan como monto para que montos() los reconozca."""
+    if isinstance(v, (int, float)) and v == v and not isinstance(v, bool):
+        if 50_000 <= v <= 400_000_000:
+            return "$ " + f"{int(round(v)):,}".replace(",", ".")
+        return str(int(v)) if float(v).is_integer() else str(v)
+    return "" if v is None or (isinstance(v, float) and v != v) else str(v)
+
+
+def extraer_xlsx(ruta: Path, cruz: Cruzador) -> list[dict]:
+    filas = []
+    hojas = pd.read_excel(ruta, sheet_name=None, header=None, dtype=object)
+    for nh, (nombre, df) in enumerate(hojas.items(), start=1):
+        tabla = [[_celda_xlsx(v) for v in fila] for fila in df.itertuples(index=False)]
+        filas += _procesar_tabla(tabla, nh, cruz, "xlsx")
     return filas
 
 
@@ -188,17 +232,37 @@ def _limpiar_nombre(nombre: str) -> str:
     return re.sub(r"(?:\s+\d{1,3}){1,2}\s*$", "", nombre.strip(" |:-$\t")).strip()
 
 
-def extraer_lineas(paginas: list[str], cruz: Cruzador) -> list[dict]:
+_RE_COHORTE_NUEVOS = re.compile(r"a partir del?\s*(?:ano\s*)?20\d\d|estudiantes? nuevos|nuevo ingreso|primer ingreso")
+_RE_COHORTE_ANTIGUOS = re.compile(r"hasta el\s*(?:ano\s*)?20\d\d|durante el\s*(?:ano\s*)?20\d\d|antiguos")
+
+
+def _valor_linea(linea: str, vals: list[float]) -> float:
+    """Elige el valor del año objetivo en una línea con varios montos.
+    'valor 2025 | 5,51% | valor 2026' -> el monto después del último %; si no hay
+    monto después, el mayor entre pares con razón 1,00-1,20 (valor incrementado)."""
+    if len(vals) >= 2 and "%" in linea:
+        cola = linea[linea.rfind("%") + 1:]
+        despues = montos(cola)
+        if despues:
+            return despues[0]
+        a, b = vals[0], vals[1]
+        if b > a and 1.0 < b / a <= 1.2:
+            return b
+    return vals[0]
+
+
+def extraer_lineas(paginas: list[str], cruz: Cruzador, metodo: str = "lineas") -> list[dict]:
     filas = []
     unidad_doc = _unidad(" ".join(paginas[:2]))
     usa_dolar = sum(p.count("$") for p in paginas) >= 3
+    escala = escala_documento(paginas)
     for npag, txt in enumerate(paginas, start=1):
         lineas = [_corregir_dolar_ocr(l, usa_dolar) for l in txt.splitlines()]
         previa = ""
         unidad = unidad_doc
         for k, linea in enumerate(lineas):
             lp = plano(linea)
-            vals = montos(linea)
+            vals = montos(linea, escala)
             if not vals:
                 if _RE_SECCION_CREDITO.search(lp):
                     unidad = "Credito"
@@ -209,22 +273,41 @@ def extraer_lineas(paginas: list[str], cruz: Cruzador) -> list[dict]:
             if _EXCLUIR_LINEA.search(lp):
                 continue
             ms = list(_RE_MONTO.finditer(linea))
-            nombre = _limpiar_nombre(linea[: ms[0].start()])
-            if len(clave_nombre(nombre)) < 4 and previa:
-                nombre = _limpiar_nombre(previa)  # el nombre quedó en la línea anterior
-            cands, tipo = cruz.por_nombre(nombre)
-            siguiente = lineas[k + 1] if k + 1 < len(lineas) else ""
-            if (not cands or tipo == "nombre_aproximado") and siguiente and not montos(siguiente) and len(siguiente.strip()) < 60:
-                c2, t2 = cruz.por_nombre(nombre + " " + siguiente.strip())  # nombre partido en dos líneas
-                if c2 and (not cands or "exacto" in t2):
-                    cands, tipo = c2, t2 + "+continuacion"
+            antes = linea[: ms[0].start()]
+            # código SNIES dentro de la línea ("21267 | INGENIERIA CIVIL D 6,651,000")
+            prog = cruz.por_codigo(re.findall(r"(?<![\d.,])\d{3,6}(?![\d.,])", antes))
+            if prog:
+                cands, tipo = [prog], "codigo_snies_linea"
+            else:
+                nombre = _limpiar_nombre(antes)
+                nombre = re.sub(r"\b(admitidos?|a partir|hasta|durante)\b.*$", "", nombre, flags=re.I).strip() or nombre
+                if len(clave_nombre(nombre)) < 4 and previa:
+                    nombre = _limpiar_nombre(previa)  # el nombre quedó en la línea anterior
+                cands, tipo = cruz.por_nombre(nombre)
+                siguiente = lineas[k + 1] if k + 1 < len(lineas) else ""
+                if (not cands or tipo == "nombre_aproximado") and siguiente and not montos(siguiente, escala) and len(siguiente.strip()) < 60:
+                    c2, t2 = cruz.por_nombre(nombre + " " + siguiente.strip())  # nombre partido en dos líneas
+                    if c2 and (not cands or "exacto" in t2):
+                        cands, tipo = c2, t2 + "+continuacion"
             if not cands:
                 continue
+            cohorte = "nuevos" if _RE_COHORTE_NUEVOS.search(lp) else "antiguos" if _RE_COHORTE_ANTIGUOS.search(lp) else ""
+            valor = _valor_linea(linea, vals)
             for p in cands:
-                filas.append({"ID_PRGRM": p.id_prgrm, "PRC": vals[0], "PRD_PRC": unidad, "PAGINA": npag,
-                              "METODO": "lineas", "CRUCE": tipo, "ENCABEZADO": "", "TEXTO_FILA": linea.strip()[:300]})
+                filas.append({"ID_PRGRM": p.id_prgrm, "PRC": valor, "PRD_PRC": unidad, "PAGINA": npag,
+                              "METODO": metodo + ("_miles" if escala != 1 else ""), "CRUCE": tipo, "ENCABEZADO": "",
+                              "COHORTE": cohorte, "TEXTO_FILA": linea.strip()[:300]})
             previa = ""
     return filas
+
+
+def paginas_layout(pdf_path: Path) -> list[str]:
+    """Texto por página respetando la posición horizontal: en tablas sin bordes,
+    el nombre del programa y sus valores quedan en la misma línea."""
+    import pdfplumber
+
+    with pdfplumber.open(pdf_path) as pdf:
+        return [pg.extract_text(layout=True) or "" for pg in pdf.pages]
 
 
 _RE_TITULO_MQ = re.compile(r"medico[s]?\s*(?:y\s*)?quirurgic|especialidades medic")
@@ -285,14 +368,17 @@ def consolidar(filas: list[dict]) -> pd.DataFrame:
     if not filas:
         return pd.DataFrame()
     df = pd.DataFrame(filas)
-    prio = {"codigo_snies": 0}
+    prio = {"codigo_snies": 0, "codigo_snies_linea": 0}
     df["_p"] = df["CRUCE"].map(lambda c: prio.get(c, 3 if c.startswith("valor_unico") else
                                          1 if "exacto" in c and "multiple" not in c else 2))
-    df["_m"] = (df["METODO"] != "tabla").astype(int)
+    df["_m"] = (~df["METODO"].isin(["tabla", "xlsx"])).astype(int)
+    coh = df["COHORTE"] if "COHORTE" in df else pd.Series("", index=df.index)
+    df["_c"] = coh.fillna("").map({"nuevos": 0, "": 1, "antiguos": 2})
     out = []
     for idp, g in df.groupby("ID_PRGRM"):
-        g = g.sort_values(["_p", "_m", "PAGINA"])
+        g = g.sort_values(["_p", "_c", "_m", "PAGINA"])
         mejor = g[g["_p"] == g["_p"].min()]
+        mejor = mejor[mejor["_c"] == mejor["_c"].min()]
         vals = mejor["PRC"].round(-2).value_counts()
         fila = mejor.iloc[0].to_dict()
         fila["PRC"] = float(mejor[mejor["PRC"].round(-2) == vals.index[0]]["PRC"].iloc[0])
@@ -300,7 +386,7 @@ def consolidar(filas: list[dict]) -> pd.DataFrame:
         fila["CONFLICTO"] = len(vals) > 1
         fila["VALORES_ALTERNOS"] = "; ".join(f"{v:,.0f}" for v in vals.index[1:4])
         out.append(fila)
-    return pd.DataFrame(out).drop(columns=["_p", "_m"])
+    return pd.DataFrame(out).drop(columns=["_p", "_m", "_c"])
 
 
 def a_staging(consolidado: pd.DataFrame, base: pd.DataFrame, id_prd: int) -> pd.DataFrame:

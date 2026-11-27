@@ -1,4 +1,4 @@
-from dpcol.extraer import Cruzador, Programa, consolidar, extraer_lineas, extraer_valor_unico, montos
+from dpcol.extraer import Cruzador, Programa, consolidar, escala_documento, extraer_lineas, extraer_valor_unico, montos
 
 
 def _cruz():
@@ -80,3 +80,31 @@ def test_valor_unico_mq_rosario():
     filas = f + [{"ID_PRGRM": 20, "PRC": 25_000_000.0, "PRD_PRC": "Semestral", "PAGINA": 1, "METODO": "lineas",
                   "CRUCE": "nombre_exacto", "ENCABEZADO": "", "TEXTO_FILA": ""}]
     assert consolidar(filas).set_index("ID_PRGRM").loc[20, "PRC"] == 25_000_000.0
+
+
+def test_xlsx_con_codigo_y_extraordinaria(tmp_path):
+    import pandas as pd
+    from dpcol.extraer import extraer_xlsx
+    ruta = tmp_path / "t.xlsx"
+    pd.DataFrame([["SNIES", "Programa", "Valor matrícula ordinaria 2026", "Valor extraordinaria"],
+                  [2051, "Administración de Empresas", 5274600, 6329500],
+                  [100, "Antropología", 14340000, 15000000]]).to_excel(ruta, header=False, index=False)
+    got = {r["ID_PRGRM"]: (r["PRC"], r["CRUCE"]) for r in extraer_xlsx(ruta, _cruz())}
+    assert got == {1: (5274600.0, "codigo_snies"), 3: (14340000.0, "codigo_snies")}
+
+
+def test_lineas_codigo_porcentaje_cohorte_y_miles():
+    c = Cruzador([Programa(30, 14384, "CONTADURIA PUBLICA"), Programa(31, 2990, "ARQUITECTURA"),
+                  Programa(32, 21267, "INGENIERIA CIVIL"), Programa(33, 55061, "BIOLOGIA")])
+    uan = "Contaduría Pública Presencial | Bogotá 14384 | 5.278.000 | 5.568.000 | 290.000 5,49%"
+    jav = ("ARQUITECTURA Admitidos hasta el año 2023 $ 17.000.000 5,95% $ 18.000.000\n"
+           "ARQUITECTURA Admitidos a partir del año 2026 $ 18.984.000 6,51% $20.220.000")
+    sinu = "4 21267 | INGENIERIA CIVIL D 6,651,000"
+    f = consolidar(extraer_lineas([uan + "\n" + jav + "\n" + sinu], c)).set_index("ID_PRGRM")
+    assert f.loc[30, "PRC"] == 5568000 and f.loc[30, "CRUCE"] == "codigo_snies_linea"
+    assert f.loc[31, "PRC"] == 20220000 and not f.loc[31, "CONFLICTO"]
+    assert f.loc[32, "PRC"] == 6651000
+    salle = ["Valores en miles de pesos\n" + "\n".join(f"Programa {i} 3.145" for i in range(5)) + "\nBiología\n8.315"]
+    assert escala_documento(salle) == 1000
+    g = {r["ID_PRGRM"]: r["PRC"] for r in extraer_lineas(["Valores en miles de pesos\nBiología 8.315"], c)}
+    assert g == {33: 8315000}
